@@ -193,16 +193,17 @@ load_css("style.css")
 
 if 'user' not in st.session_state: st.session_state.user = None
 
-# === בדיקת עוגיות (Auto Login) ===
-# כאן התיקון: אנחנו בודקים אם הרגע לחצנו על יציאה לפני שמנסים להתחבר שוב
+# === בדיקת עוגיות (Auto Login) - גרסה משופרת ===
 if st.session_state.user is None:
+    # אם לחצנו על התנתק, נדלג על הבדיקה ונאפס את הדגל לפעם הבאה
     if st.session_state.get('logout_clicked', False):
         st.session_state.logout_clicked = False
     else:
-        # אנו ממתינים רגע קטן כדי לוודא שה-Component נטען
+        # קריאת העוגיה
         cookie_phone = cookie_manager.get(cookie="logged_user_phone")
         
-        if cookie_phone:
+        # התיקון: מוודאים שהעוגיה קיימת וגם שהיא לא סתם טקסט ריק
+        if cookie_phone and str(cookie_phone).strip() != "":
             users_db = get_data("Users")
             if not users_db.empty:
                 users_db['CleanPhone'] = users_db['Phone'].astype(str).str.replace("'", "").str.replace("-", "").str.replace(" ", "")
@@ -272,12 +273,20 @@ else:
     
     menu = st.sidebar.radio("תפריט", ["לוח שנה ושיריון", "השיריונים שלי", "ניהול"] if is_admin else ["לוח שנה ושיריון", "השיריונים שלי"])
     
-    # === כפתור התנתק מתוקן ===
+    # === כפתור התנתק משופר ===
     if st.sidebar.button("התנתק"):
+        # 1. דריסת העוגיה עם ערך ריק (הכי חשוב!)
+        cookie_manager.set("logged_user_phone", "", key="logout_overwrite")
+        
+        # 2. שליחת פקודת מחיקה ליתר ביטחון
         cookie_manager.delete("logged_user_phone")
-        st.session_state.logout_clicked = True # מסמנים שהתנתקנו
+        
+        # 3. איפוס הסשן והדלקת דגל יציאה
+        st.session_state.logout_clicked = True
         st.session_state.user = None
-        tm.sleep(0.5)
+        
+        # 4. השהייה ארוכה יותר (3 שניה) לתת לדפדפן זמן לעכל
+        tm.sleep(3)
         st.rerun()
 
     # --- לוח שנה ---
