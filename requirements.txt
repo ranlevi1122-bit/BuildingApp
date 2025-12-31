@@ -1,0 +1,9 @@
+streamlit
+pandas
+gspread
+oauth2client
+requests
+bcrypt
+holidays
+streamlit-calendar
+extra-streamlit-components

@@ -1,0 +1,77 @@
+/* style.css - מעודכן לסידור Flex ימין-שמאל */
+
+/* 1. הגדרות כלליות */
+.stApp {
+    direction: rtl;
+    text-align: right;
+    background-color: #c0c0bb80; /* רקע אפור-כחלחל מודרני */
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+}
+
+/* 2. ניצול רוחב מסך מלא */
+div.block-container {
+    max-width: 100% !important;
+    padding: 2rem 3rem; /* קצת מרווח מהצדדים */
+}
+
+/* 3. טיפול בעמודות (ה-Flex של סטרימליט) */
+/* זה מוודא שהעמודות מתחילות באותו גובה */
+div[data-testid="stHorizontalBlock"] {
+    align-items: flex-start; 
+}
+
+/* עיצוב הקונטיינר של הטופס (בצד ימין) */
+div[data-testid="stForm"] {
+    background-color: rgb(230, 213, 213);
+    padding: 5px;
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+}
+
+/* 4. כפתורים */
+.stButton>button {
+    background-color: #43b249; /* ירוק כהה יותר */
+    color: rgb(255, 255, 255);
+    border-radius: 8px;
+    border: none;
+    height: 3em;
+    font-weight: bold;
+    width: 100%;
+    margin-top: 10px;
+}
+.stButton>button:hover {
+    background-color: #1b5e20;
+}
+
+/* 5. כותרות */
+h1, h2, h3, h4, h5 {
+    color: #3f484c;
+    font-family: 'Segoe UI', sans-serif;
+}
+.stMarkdown, h1, h2, h3 {
+    text-align: right !important;
+}
+
+/* 6. אינפוטים */
+input {
+    direction: rtl;
+    text-align: right;
+}
+
+/* 7. לוח שנה - התאמות עיצוב */
+.fc-toolbar-title {
+    font-size: 1.5em !important;
+    font-weight: 700;
+    color: #000000;
+}
+/* הסתרת כפתורים מיותרים בלוח אם יש */
+.fc-header-toolbar {
+    margin-bottom: 1.5em !important;
+}
+
+/* שינוי צבע הטקסט בתוך הודעות הצלחה (הירוקות) */
+div[data-testid="stNotification"] p {
+    color: #171515 !important; /* שנה ל-black או #ffffff או כל צבע שתרצה */
+    font-weight: bold;         /* אופציונלי: הופך את הטקסט למודגש */
+}
+
