@@ -188,7 +188,7 @@ def get_calendar_events():
     return events
 
 # --- האפליקציה הראשית ---
-st.set_page_config(page_title="ניהול דיירים", layout="wide")
+st.set_page_config(page_title="ניהול חדר דיירים", layout="wide")
 
 load_css("style.css")
 
