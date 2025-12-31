@@ -655,6 +655,10 @@ else:
         tm.sleep(0.5)
         st.rerun()
 
+    st.sidebar.markdown("---")
+    st.sidebar.caption(f"© {datetime.now().year} כל הזכויות שמורות - רן לוי מוביל ועד הבית והאדמין")
+    st.sidebar.caption("פותח עבור בניין שדרות לכיש 129 🏡")
+
     # --- 1. לוח שנה ושיריון (ללא שינוי מהותי) ---
     if menu == "לוח שנה ושיריון":
         st.header("📅 יומן תפוסה ושיריון")
