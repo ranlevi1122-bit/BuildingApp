@@ -5,7 +5,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, time, date, timedelta
 import requests
 import uuid
-import bcrypt
 import holidays
 from streamlit_calendar import calendar
 import extra_streamlit_components as stx
@@ -16,9 +15,9 @@ def load_css(file_name):
     try:
         with open(file_name, encoding='utf-8') as f:
             st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-    except FileNotFoundError: pass
+    except: pass
 
-# --- הגדרות וקבועים ---
+# --- הגדרות ---
 SHEET_ID = '1Uf_bLdIKz8aJAc1BV1OZvQwNP5Rzn4LqnQSuhL9htjg' 
 DATE_FMT = '%Y-%m-%d'
 TIME_FMT = '%H:%M'
@@ -26,22 +25,20 @@ STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 STATUS_ACTIVE = "active"
+STATUS_EDIT_PENDING = "pending_edit"
 
-# --- ניהול עוגיות (Cookie Manager) ---
+# @st.cache_resource
 def get_cookie_manager():
-    # שינינו את המפתח לגרסה v2 כדי לאפס זיכרונות ישנים בדפדפן
-    return stx.CookieManager(key="auth_cookie_manager_v2")
+    return stx.CookieManager(key="auth_cookie_v4")
 
 cookie_manager = get_cookie_manager()
 
-# --- 1. אבטחה והצפנה ---
-def hash_password(password):
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+# --- אבטחה (השוואת טקסט רגיל) ---
+def verify_password(input_pass, stored_pass):
+    # הפיכה לסטרינג מונעת את השגיאה שקיבלת (AttributeError על encode)
+    return str(input_pass).strip() == str(stored_pass).strip()
 
-def verify_password(password, hashed):
-    return bcrypt.checkpw(password.encode(), hashed.encode())
-
-# --- 2. חיבור לגוגל שיטס ---
+# --- חיבור לגוגל שיטס ---
 @st.cache_resource
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -53,41 +50,65 @@ def get_gspread_client():
             creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
         return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"שגיאה בהתחברות לגוגל: {e}")
+        st.error(f"שגיאה בחיבור: {e}")
         st.stop()
+
+def send_telegram(message):
+    try:
+        # בדיקה שהמפתחות קיימים ב-Secrets של Streamlit
+        if "general" in st.secrets:
+            token = st.secrets["general"]["telegram_token"]
+            chat_id = st.secrets["general"]["telegram_chat_id"]
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            # שליחה עם Timeout כדי שהאפליקציה לא תיתקע אם אין אינטרנט
+            requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=5)
+    except Exception: 
+        pass # מונע קריסה של כל האפליקציה אם יש תקלה בטלגרם
 
 def get_worksheet(name):
     client = get_gspread_client()
-    try:
-        sh = client.open_by_key(SHEET_ID)
-        return sh.worksheet(name)
-    except Exception as e:
-        st.error(f"שגיאה בטעינת הגיליון '{name}': {e}")
-        st.stop()
+    sh = client.open_by_key(SHEET_ID)
+    return sh.worksheet(name)
 
-# --- 3. כלי עזר (טלגרם ודאטה) ---
-def send_telegram(message):
-    try:
-        token = st.secrets["general"]["telegram_token"]
-        chat_id = st.secrets["general"]["telegram_chat_id"]
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": message})
-    except: pass 
-
-@st.cache_data(ttl=60)
 def get_data(sheet_name):
     ws = get_worksheet(sheet_name)
-    return pd.DataFrame(ws.get_all_records())
+    # שימוש ב-values כדי להתגבר על בעיות כותרות/הקפאה
+    all_values = ws.get_all_values()
+    if not all_values: return pd.DataFrame()
+    
+    # ניקוי רווחים מהכותרות בשורה הראשונה
+    headers = [str(h).strip() for h in all_values[0]]
+    df = pd.DataFrame(all_values[1:], columns=headers)
+    return df
+
+# --- לוגיקה ---
+def login_user(phone, password):
+    users = get_data("Users")
+    if users.empty: return None
+    
+    clean_phone = str(phone).strip().replace("-", "").replace(" ", "")
+    users['CleanPhone'] = users['Phone'].astype(str).str.replace("'", "").str.replace(" ", "")
+    
+    user_row = users[users['CleanPhone'] == clean_phone]
+    if user_row.empty: return None
+    
+    # שימוש בפונקציה החדשה ללא bcrypt
+    if verify_password(password, user_row.iloc[0]['Password']):
+        return user_row.iloc[0].to_dict()
+    return None
 
 def update_status_safe(sheet_name, id_col, item_id, status_col_idx, new_status):
     ws = get_worksheet(sheet_name)
-    df = pd.DataFrame(ws.get_all_records())
+    df = get_data(sheet_name)
     try:
-        df[id_col] = df[id_col].astype(str)
-        row_idx = df[df[id_col] == str(item_id)].index[0] + 2
+        row_idx = df[df[id_col].astype(str) == str(item_id)].index[0] + 2
         ws.update_cell(row_idx, status_col_idx, new_status)
         st.cache_data.clear()
         return True
     except: return False
+
+# --- שאר הפונקציות (get_calendar_events, add_booking וכו' - נשארות כפי שהן) ---
+# [כאן יש להמשיך עם הפונקציות הקיימות שלך מהקוד שעבד קודם]
 
 # --- 4. לוגיקה עסקית ---
 # def register_user(full_name, phone, apt, role, password):
@@ -102,8 +123,8 @@ def update_status_safe(sheet_name, id_col, item_id, status_col_idx, new_status):
 #     ws.append_row([full_name, f"'{clean_phone}", str(apt), role, hashed_pw, STATUS_PENDING, "user"])
 #     st.cache_data.clear()
     
-#     send_telegram(f"🔔 *הרשמה חדשה*\nשם: {full_name}\nדירה: {apt}\nטלפון: {phone}")
-#     return True, "בקשת ההרשמה נשלחה למנהל המערכת לאישור."
+    send_telegram(f"🔔 *הרשמה חדשה*\nשם: {full_name}\nדירה: {apt}\nטלפון: {phone}")
+    return True, "בקשת ההרשמה נשלחה למנהל המערכת לאישור."
 
 def register_user(full_name, phone, apt, role, password):
     ws = get_worksheet("Users")
@@ -140,20 +161,21 @@ def register_user(full_name, phone, apt, role, password):
 
 def login_user(phone, password):
     users = get_data("Users")
-    clean_input = str(phone).strip().replace("-", "").replace(" ", "")
-    
     if users.empty: return None
     
+    clean_input = str(phone).strip().replace("-", "").replace(" ", "")
     users['CleanPhone'] = users['Phone'].astype(str).str.replace("'", "").str.replace("-", "").str.replace(" ", "")
+    
     user_row = users[users['CleanPhone'] == clean_input]
     
     if user_row.empty: return None
     
-    # --- שינוי: השוואה רגילה של טקסט מול טקסט ---
-    stored_password = str(user_row.iloc[0]['Password'])
-    if str(password).strip() == stored_password.strip():
-        return user_row.iloc[0].to_dict()
+    # שליפת הסיסמה מהשיטס (עמודה Password)
+    stored_password = user_row.iloc[0]['Password']
     
+    # כאן מתבצעת הקריאה לפונקציה שתיקנו למעלה
+    if verify_password(password, stored_password):
+        return user_row.iloc[0].to_dict()
     return None
 
 
