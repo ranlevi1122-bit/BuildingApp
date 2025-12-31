@@ -2,14 +2,14 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime, time, date, timedelta # <--- הוספנו את timedelta
+from datetime import datetime, time, date, timedelta
 import requests
 import uuid
 import bcrypt
 import holidays
 from streamlit_calendar import calendar
 import extra_streamlit_components as stx
-import time as tm # <--- הוספנו את מודול הזמן להשהיות קצרות
+import time as tm
 
 # --- פונקציה לטעינת ה-CSS ---
 def load_css(file_name):
@@ -28,7 +28,6 @@ STATUS_REJECTED = "rejected"
 STATUS_ACTIVE = "active"
 
 # --- ניהול עוגיות (Cookie Manager) ---
-# הסרנו את ה-cache ואנחנו מגדירים מפתח (key) קבוע כדי למנוע ניתוקים
 def get_cookie_manager():
     return stx.CookieManager(key="auth_cookie_manager")
 
@@ -195,20 +194,23 @@ load_css("style.css")
 if 'user' not in st.session_state: st.session_state.user = None
 
 # === בדיקת עוגיות (Auto Login) ===
-# הבדיקה מתבצעת רק אם המשתמש לא מחובר ב-Session הנוכחי
+# כאן התיקון: אנחנו בודקים אם הרגע לחצנו על יציאה לפני שמנסים להתחבר שוב
 if st.session_state.user is None:
-    # אנו ממתינים רגע קטן כדי לוודא שה-Component נטען
-    cookie_phone = cookie_manager.get(cookie="logged_user_phone")
-    
-    if cookie_phone:
-        users_db = get_data("Users")
-        if not users_db.empty:
-            users_db['CleanPhone'] = users_db['Phone'].astype(str).str.replace("'", "").str.replace("-", "").str.replace(" ", "")
-            found_user = users_db[users_db['CleanPhone'] == str(cookie_phone)]
-            
-            if not found_user.empty:
-                st.session_state.user = found_user.iloc[0].to_dict()
-                st.rerun()
+    if st.session_state.get('logout_clicked', False):
+        st.session_state.logout_clicked = False
+    else:
+        # אנו ממתינים רגע קטן כדי לוודא שה-Component נטען
+        cookie_phone = cookie_manager.get(cookie="logged_user_phone")
+        
+        if cookie_phone:
+            users_db = get_data("Users")
+            if not users_db.empty:
+                users_db['CleanPhone'] = users_db['Phone'].astype(str).str.replace("'", "").str.replace("-", "").str.replace(" ", "")
+                found_user = users_db[users_db['CleanPhone'] == str(cookie_phone)]
+                
+                if not found_user.empty:
+                    st.session_state.user = found_user.iloc[0].to_dict()
+                    st.rerun()
 
 # --- מסך התחברות / הרשמה ---
 if not st.session_state.user:
@@ -230,12 +232,10 @@ if not st.session_state.user:
                     
                     # === שמירת עוגיה תקינה ===
                     clean_phone_cookie = str(l_phone).strip().replace("-", "").replace(" ", "")
-                    # משתמשים ב-timedelta כדי להוסיף 7 ימים בצורה תקינה
                     expires = datetime.now() + timedelta(days=7)
                     
                     cookie_manager.set("logged_user_phone", clean_phone_cookie, expires_at=expires)
                     
-                    # חשוב: השהייה קצרה כדי לתת לדפדפן זמן לשמור את העוגיה לפני הריענון
                     tm.sleep(0.5) 
                     st.rerun()
                     
@@ -272,11 +272,12 @@ else:
     
     menu = st.sidebar.radio("תפריט", ["לוח שנה ושיריון", "השיריונים שלי", "ניהול"] if is_admin else ["לוח שנה ושיריון", "השיריונים שלי"])
     
+    # === כפתור התנתק מתוקן ===
     if st.sidebar.button("התנתק"):
-        # מחיקת העוגיה + השהייה קטנה
         cookie_manager.delete("logged_user_phone")
-        tm.sleep(0.5)
+        st.session_state.logout_clicked = True # מסמנים שהתנתקנו
         st.session_state.user = None
+        tm.sleep(0.5)
         st.rerun()
 
     # --- לוח שנה ---
