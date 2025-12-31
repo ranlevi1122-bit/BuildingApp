@@ -645,13 +645,19 @@ else:
         
     menu = st.sidebar.radio("תפריט", menu_opts)
     
-    # כפתור התנתק (אותו קוד מהתיקון הקודם)
     if st.sidebar.button("התנתק"):
-        cookie_manager.set("logged_user_phone", "")
-        try: cookie_manager.delete("logged_user_phone")
-        except: pass
-        st.session_state.logout_clicked = True
+        # 1. מחיקה פיזית של העוגיה מהדפדפן
+        cookie_manager.delete("logged_user_phone")
+        
+        # 2. עדכון ה-State כדי למנוע כניסה אוטומטית מיידית
         st.session_state.user = None
+        st.session_state.logout_clicked = True
+        
+        # 3. ניקוי המטמון המקומי
+        st.cache_data.clear()
+        
+        # 4. הודעה קצרה וריענון
+        st.sidebar.success("מתנתק...")
         tm.sleep(0.5)
         st.rerun()
 
