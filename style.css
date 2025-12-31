@@ -62,7 +62,7 @@
 
 /* 3. עיצוב טופס וכפתורים */
 div[data-testid="stForm"] {
-    background-color: rgb(230, 213, 213);
+    background-color: rgb(64, 59, 59);
     padding: 10px;
     border-radius: 15px;
     box-shadow: 0 4px 15px rgba(0,0,0,0.05);

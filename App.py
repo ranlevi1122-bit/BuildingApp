@@ -90,6 +90,21 @@ def update_status_safe(sheet_name, id_col, item_id, status_col_idx, new_status):
     except: return False
 
 # --- 4. לוגיקה עסקית ---
+# def register_user(full_name, phone, apt, role, password):
+#     ws = get_worksheet("Users")
+#     users = get_data("Users")
+#     clean_phone = phone.strip()
+    
+#     if not users.empty and str(clean_phone) in users['Phone'].astype(str).values:
+#         return False, "הטלפון כבר קיים במערכת"
+
+#     hashed_pw = hash_password(password)
+#     ws.append_row([full_name, f"'{clean_phone}", str(apt), role, hashed_pw, STATUS_PENDING, "user"])
+#     st.cache_data.clear()
+    
+#     send_telegram(f"🔔 *הרשמה חדשה*\nשם: {full_name}\nדירה: {apt}\nטלפון: {phone}")
+#     return True, "בקשת ההרשמה נשלחה למנהל המערכת לאישור."
+
 def register_user(full_name, phone, apt, role, password):
     ws = get_worksheet("Users")
     users = get_data("Users")
@@ -98,12 +113,30 @@ def register_user(full_name, phone, apt, role, password):
     if not users.empty and str(clean_phone) in users['Phone'].astype(str).values:
         return False, "הטלפון כבר קיים במערכת"
 
-    hashed_pw = hash_password(password)
-    ws.append_row([full_name, f"'{clean_phone}", str(apt), role, hashed_pw, STATUS_PENDING, "user"])
-    st.cache_data.clear()
+    # --- שינוי: הוסר ה-Hash, שומרים את הסיסמה כמו שהיא ---
+    ws.append_row([full_name, f"'{clean_phone}", str(apt), role, password, STATUS_PENDING, "user"])
     
+    st.cache_data.clear()
     send_telegram(f"🔔 *הרשמה חדשה*\nשם: {full_name}\nדירה: {apt}\nטלפון: {phone}")
     return True, "בקשת ההרשמה נשלחה למנהל המערכת לאישור."
+
+
+
+# def login_user(phone, password):
+#     users = get_data("Users")
+#     clean_input = str(phone).strip().replace("-", "").replace(" ", "")
+    
+#     if users.empty: return None
+    
+#     users['CleanPhone'] = users['Phone'].astype(str).str.replace("'", "").str.replace("-", "").str.replace(" ", "")
+#     user_row = users[users['CleanPhone'] == clean_input]
+    
+#     if user_row.empty: return None
+    
+#     stored_hash = user_row.iloc[0]['Password']
+#     if verify_password(password, stored_hash):
+#         return user_row.iloc[0].to_dict()
+#     return None
 
 def login_user(phone, password):
     users = get_data("Users")
@@ -116,10 +149,13 @@ def login_user(phone, password):
     
     if user_row.empty: return None
     
-    stored_hash = user_row.iloc[0]['Password']
-    if verify_password(password, stored_hash):
+    # --- שינוי: השוואה רגילה של טקסט מול טקסט ---
+    stored_password = str(user_row.iloc[0]['Password'])
+    if str(password).strip() == stored_password.strip():
         return user_row.iloc[0].to_dict()
+    
     return None
+
 
 def check_overlap(date_str, start_str, end_str):
     bookings = get_data("Bookings")
@@ -138,23 +174,124 @@ def check_overlap(date_str, start_str, end_str):
             return True
     return False
 
-def add_booking(user_data, date_obj, start, end):
+# --- פונקציה מעודכנת: הוספת שיריון עם בדיקת כפילות חכמה (Race Condition Fix) ---
+def add_booking(user_data, date_obj, start, end, is_maintenance=False):
+    # 1. בדיקות מקדימות
     if start >= end: return False, "שעת הסיום חייבת להיות אחרי שעת ההתחלה"
     
     date_str = date_obj.strftime(DATE_FMT)
     start_str = start.strftime(TIME_FMT)
     end_str = end.strftime(TIME_FMT)
     
+    # בדיקה ראשונית בזיכרון (מהירה)
     if check_overlap(date_str, start_str, end_str):
         return False, "החדר תפוס (או ממתין לאישור) בשעות אלו"
         
     ws = get_worksheet("Bookings")
     b_id = str(uuid.uuid4())[:8]
-    ws.append_row([b_id, f"'{user_data['Phone']}", user_data['Full Name'], date_str, start_str, end_str, STATUS_PENDING, str(user_data['Apt'])])
     
+    # הגדרת פרטים לפי סוג (תחזוקה או רגיל)
+    name = "⛔ תחזוקה/חסום" if is_maintenance else user_data['Full Name']
+    status = "approved" if is_maintenance else STATUS_PENDING
+    apt = "0" if is_maintenance else str(user_data.get('Apt', '0'))
+    phone = "admin" if is_maintenance else str(user_data['Phone'])
+
+    # 2. כתיבה לגוגל שיטס
+    row_data = [b_id, f"'{phone}", name, date_str, start_str, end_str, status, apt]
+    ws.append_row(row_data)
+    
+    # 3. בדיקה חוזרת (Double Check) למניעת התנגשות בזמן אמת
+    # אנחנו מנקים את הזיכרון, מושכים נתונים מחדש ובודקים אם נוצרה חפיפה כרגע
     st.cache_data.clear()
-    send_telegram(f"📅 *בקשה לשיריון*\nדייר: {user_data['Full Name']} (דירה {user_data['Apt']})\nתאריך: {date_str}\nשעות: {start_str}-{end_str}")
-    return True, "הבקשה נשלחה למנהל המערכת לאישור."
+    tm.sleep(1) # נותנים לגוגל שנייה להתעדכן
+    
+    # בדיקה האם יש שיריון *אחר* (לא שלי) שחופף לשלי
+    all_bookings = get_data("Bookings")
+    current_booking = all_bookings[all_bookings['Booking ID'] == b_id]
+    
+    if current_booking.empty:
+        return False, "שגיאה בכתיבת הנתונים"
+
+    # בודקים שוב חפיפה מול כל השאר
+    is_overlapping = False
+    new_start_dt = datetime.strptime(start_str, TIME_FMT).time()
+    new_end_dt = datetime.strptime(end_str, TIME_FMT).time()
+    
+    relevant = all_bookings[
+        (all_bookings['Date'] == date_str) & 
+        (all_bookings['Status'].isin([STATUS_APPROVED, STATUS_PENDING])) &
+        (all_bookings['Booking ID'] != b_id) # מתעלמים מהשורה שאנחנו הרגע יצרנו
+    ]
+    
+    for _, row in relevant.iterrows():
+        ex_start = datetime.strptime(row['Start Time'], TIME_FMT).time()
+        ex_end = datetime.strptime(row['End Time'], TIME_FMT).time()
+        if new_start_dt < ex_end and new_end_dt > ex_start:
+            is_overlapping = True
+            break
+    
+    # 4. אם גילינו חפיפה בדיעבד - מוחקים את הבקשה שלנו!
+    if is_overlapping:
+        # מוצאים את השורה ומוחקים/מסמנים כדחוי
+        cell = ws.find(b_id)
+        if cell:
+            ws.update_cell(cell.row, 7, STATUS_REJECTED) # עמודה 7 היא סטטוס
+        return False, "⚠️ מצטערים, מישהו אחר הקדים אותך בשבריר שנייה. נסה שעה אחרת."
+
+    if not is_maintenance:
+        send_telegram(f"📅 *בקשה לשיריון*\nדייר: {name}\nתאריך: {date_str}\nשעות: {start_str}-{end_str}")
+        return True, "הבקשה נשלחה למנהל המערכת לאישור."
+    else:
+        return True, "הזמן נחסם בהצלחה."
+
+# --- פונקציה חדשה: עדכון פרטי דייר ---
+# --- פונקציה מעודכנת: עדכון פרטי דייר כולל סיסמה ---
+def update_user_details_admin(original_phone, new_name, new_phone, new_apt, new_type, new_password):
+    ws = get_worksheet("Users")
+    cell = ws.find(f"'{original_phone}") # חיפוש לפי הטלפון הישן
+    if not cell:
+        cell = ws.find(original_phone)
+    
+    if cell:
+        row = cell.row
+        # עדכון תאים לפי הסדר (שם, טלפון, דירה, סוג, סיסמה)
+        ws.update_cell(row, 1, new_name)
+        ws.update_cell(row, 2, f"'{new_phone}")
+        ws.update_cell(row, 3, str(new_apt))
+        ws.update_cell(row, 4, new_type)
+        ws.update_cell(row, 5, new_password) # עמודה 5 היא הסיסמה
+        st.cache_data.clear()
+        return True
+    return False
+
+# --- פונקציה חדשה: חישוב סטטיסטיקות ---
+def get_stats_data():
+    df = get_data("Bookings")
+    if df.empty: return None, None
+    
+    # סינון רק למאושרים
+    df = df[df['Status'] == STATUS_APPROVED]
+    
+    # 1. סטטיסטיקה לפי דירה
+    if 'Apt' in df.columns:
+        apt_counts = df['Apt'].value_counts().reset_index()
+        apt_counts.columns = ['דירה', 'הזמנות']
+    else:
+        apt_counts = pd.DataFrame()
+
+    # 2. סטטיסטיקה לפי יום בשבוע
+    # המרת תאריך ליום בשבוע
+    df['Datetime'] = pd.to_datetime(df['Date'], format=DATE_FMT, errors='coerce')
+    df = df.dropna(subset=['Datetime']) # מחיקת תאריכים לא תקינים
+    
+    # תרגום ימים לעברית
+    days_map = {0:'שני', 1:'שלישי', 2:'רביעי', 3:'חמישי', 4:'שישי', 5:'שבת', 6:'ראשון'}
+    df['Day'] = df['Datetime'].dt.dayofweek.map(days_map)
+    
+    day_counts = df['Day'].value_counts().reset_index()
+    day_counts.columns = ['יום', 'הזמנות']
+    
+    return apt_counts, day_counts
 
 def get_calendar_events():
     events = []
@@ -187,6 +324,172 @@ def get_calendar_events():
             })
     return events
 
+# --- פונקציה משודרגת: בדיקת חפיפה שמתעלמת משיריון ספציפי (לצורך עריכה) ---
+def check_overlap_for_update(date_str, start_str, end_str, ignore_booking_id):
+    bookings = get_data("Bookings")
+    if bookings.empty: return False
+    
+    # מסננים: רק שיריונים פעילים, באותו תאריך, ולא השיריון שאנחנו עורכים כרגע!
+    active = bookings[
+        (bookings['Date'] == date_str) & 
+        (bookings['Status'].isin([STATUS_APPROVED, STATUS_PENDING])) & 
+        (bookings['Booking ID'] != ignore_booking_id) # זה החלק הקריטי
+    ]
+    
+    if active.empty: return False
+    
+    new_start = datetime.strptime(start_str, TIME_FMT).time()
+    new_end = datetime.strptime(end_str, TIME_FMT).time()
+    
+    for _, row in active.iterrows():
+        ex_start = datetime.strptime(row['Start Time'], TIME_FMT).time()
+        ex_end = datetime.strptime(row['End Time'], TIME_FMT).time()
+        if new_start < ex_end and new_end > ex_start:
+            return True
+    return False
+
+# --- פונקציה חדשה: עדכון שיריון קיים (עריכה) ---
+def edit_existing_booking(booking_id, new_date, new_start, new_end):
+    if new_start >= new_end: return False, "שעת הסיום חייבת להיות אחרי ההתחלה"
+    
+    d_str = new_date.strftime(DATE_FMT)
+    s_str = new_start.strftime(TIME_FMT)
+    e_str = new_end.strftime(TIME_FMT)
+    
+    # בדיקת חפיפה (שמתעלמת מעצמי)
+    if check_overlap_for_update(d_str, s_str, e_str, booking_id):
+        return False, "הזמן החדש שבחרת תפוס על ידי מישהו אחר"
+    
+    ws = get_worksheet("Bookings")
+    cell = ws.find(booking_id)
+    
+    if cell:
+        r = cell.row
+        # עדכון תאריך, התחלה, סיום (עמודות 4, 5, 6)
+        ws.update_cell(r, 4, d_str)
+        ws.update_cell(r, 5, s_str)
+        ws.update_cell(r, 6, e_str)
+        # מחזירים לסטטוס "ממתין" אחרי עריכה? לשיקולך. כאן השארתי את הסטטוס המקורי או שאפשר לשנות.
+        # ws.update_cell(r, 7, STATUS_PENDING) 
+        st.cache_data.clear()
+        return True, "השיריון עודכן בהצלחה!"
+    return False, "שיריון לא נמצא"
+
+# --- פונקציה חדשה: מחיקת משתמש וכל השיריונים שלו ---
+def delete_user_fully_admin(phone_to_delete):
+    try:
+        # 1. מחיקת המשתמש
+        ws_users = get_worksheet("Users")
+        
+        # חיפוש תא הטלפון (עם ובלי גרש)
+        cell = ws_users.find(f"'{phone_to_delete}")
+        if not cell: cell = ws_users.find(phone_to_delete)
+        
+        if cell:
+            ws_users.delete_rows(cell.row)
+        else:
+            return False, "משתמש לא נמצא"
+
+        # 2. מחיקת כל השיריונים של המשתמש
+        ws_books = get_worksheet("Bookings")
+        # אנו מוצאים את כל התאים שמכילים את הטלפון הזה
+        # הערה: זה עלול לקחת זמן אם יש המון שיריונים. 
+        # כדי לא להסתבך עם אינדקסים שזזים, נמחק אחד אחד בלולאה עד שאין יותר
+        
+        while True:
+            # מחפשים מחדש בכל איטרציה כי השורות זזו
+            try:
+                b_cell = ws_books.find(f"'{phone_to_delete}")
+                if not b_cell: b_cell = ws_books.find(phone_to_delete)
+                
+                if b_cell:
+                    ws_books.delete_rows(b_cell.row)
+                    tm.sleep(0.5) # השהייה למנוע עומס על ה-API
+                else:
+                    break # לא נמצאו עוד שיריונים
+            except:
+                break
+        
+        st.cache_data.clear()
+        return True, "המשתמש וכל השיריונים שלו נמחקו בהצלחה"
+        
+    except Exception as e:
+        return False, f"שגיאה במחיקה: {str(e)}"
+    
+# --- הגדרה קבועה לסטטוס חדש ---
+STATUS_EDIT_PENDING = "pending_edit"
+
+# --- פונקציה: דייר מבקש שינוי (יוצרת בקשה חדשה המקושרת לישנה) ---
+def request_edit_booking(user_data, original_booking_id, new_date, new_start, new_end):
+    # 1. בדיקות תקינות
+    if new_start >= new_end: return False, "שעת הסיום חייבת להיות אחרי ההתחלה"
+    
+    d_str = new_date.strftime(DATE_FMT)
+    s_str = new_start.strftime(TIME_FMT)
+    e_str = new_end.strftime(TIME_FMT)
+    
+    # 2. בדיקת חפיפה (אנחנו בודקים אם *הזמן החדש* פנוי)
+    # שימו לב: אנחנו לא מתעלמים מהשיריון המקורי כי הוא בזמן אחר, 
+    # אבל אנחנו כן צריכים לוודא שהזמן החדש פנוי.
+    if check_overlap(d_str, s_str, e_str):
+        return False, "הזמן החדש שבחרת תפוס"
+
+    # 3. יצירת רשומה חדשה בסטטוס "ממתין לעריכה"
+    ws = get_worksheet("Bookings")
+    new_id = str(uuid.uuid4())[:8]
+    
+    # מבנה השורה: ID, Phone, Name, Date, Start, End, Status, Apt, LinkedID
+    # LinkedID הוא המזהה של השיריון הישן שאותו אנחנו רוצים להחליף
+    row_data = [
+        new_id, 
+        f"'{user_data['Phone']}", 
+        user_data['Full Name'], 
+        d_str, 
+        s_str, 
+        e_str, 
+        STATUS_EDIT_PENDING,     # סטטוס מיוחד
+        str(user_data.get('Apt', '0')),
+        original_booking_id      # הקישור לשיריון המקורי
+    ]
+    
+    ws.append_row(row_data)
+    st.cache_data.clear()
+    
+    send_telegram(f"✏️ *בקשת עריכה*\nדייר: {user_data['Full Name']}\nרוצה לשנות לתאריך: {d_str}\nשעות: {s_str}-{e_str}")
+    return True, "בקשת השינוי נשלחה לאישור המנהל."
+
+# --- פונקציה: אדמין מאשר שינוי (מחליף בין הישן לחדש) ---
+def approve_edit_request(new_booking_id, original_booking_id):
+    ws = get_worksheet("Bookings")
+    
+    # 1. מוצאים את השורות
+    cell_new = ws.find(new_booking_id)
+    cell_old = ws.find(original_booking_id)
+    
+    if cell_new and cell_old:
+        # 2. מאשרים את החדש
+        ws.update_cell(cell_new.row, 7, STATUS_APPROVED)
+        
+        # 3. מבטלים את הישן (סטטוס "הוחלף")
+        ws.update_cell(cell_old.row, 7, "replaced")
+        
+        st.cache_data.clear()
+        return True, "השינוי בוצע בהצלחה"
+    
+    return False, "שגיאה במציאת השיריונים"
+
+
+
+
+
+
+
+
+
+
+
+
+
 # --- האפליקציה הראשית ---
 st.set_page_config(page_title="ניהול חדר דיירים", layout="wide")
 
@@ -194,29 +497,31 @@ load_css("style.css")
 
 if 'user' not in st.session_state: st.session_state.user = None
 
-# === בדיקת עוגיות (Auto Login) ===
-# כאן התיקון: אנחנו בודקים אם הרגע לחצנו על יציאה לפני שמנסים להתחבר שוב
+# === בדיקת עוגיות (Auto Login) עם הגנה מחיבור מחדש ===
 if st.session_state.user is None:
+    # בדיקה: האם הרגע לחצנו על התנתק? אם כן, דלג על בדיקת העוגיה
     if st.session_state.get('logout_clicked', False):
-        st.session_state.logout_clicked = False
+        st.session_state.logout_clicked = False # אפס את הדגל לפעם הבאה
     else:
-        # אנו ממתינים רגע קטן כדי לוודא שה-Component נטען
+        # קריאת העוגיה
         cookie_phone = cookie_manager.get(cookie="logged_user_phone")
         
-        # מוודאים שהעוגיה קיימת ולא ריקה
+        # מוודאים שהעוגיה קיימת ושיש בה תוכן אמיתי (לא ריקה)
         if cookie_phone and str(cookie_phone).strip() != "":
             users_db = get_data("Users")
             if not users_db.empty:
+                # ניקוי הטלפון מהעוגיה כדי להשוות לדאטה בייס
                 users_db['CleanPhone'] = users_db['Phone'].astype(str).str.replace("'", "").str.replace("-", "").str.replace(" ", "")
                 found_user = users_db[users_db['CleanPhone'] == str(cookie_phone)]
                 
                 if not found_user.empty:
+                    # מצאנו משתמש תואם לעוגיה - מחברים אותו
                     st.session_state.user = found_user.iloc[0].to_dict()
                     st.rerun()
 
 # --- מסך התחברות / הרשמה ---
 if not st.session_state.user:
-    st.title("🏡 פורטל הבניין (v2)")
+    st.title("🏡 מערכת לניהול חדר דיירים (v2)")
     tab1, tab2 = st.tabs(["כניסה", "הרשמה"])
     
     with tab1:
@@ -251,19 +556,57 @@ if not st.session_state.user:
 
     with tab2:
         st.info("מלא את הפרטים ונשלח בקשה למנהל")
-        r_name = st.text_input("שם מלא")
-        r_phone = st.text_input("טלפון")
-        r_apt = st.number_input("מספר דירה", min_value=1, max_value=49, step=1)
-        r_type = st.selectbox("אני...", ["בעל דירה", "שוכר"])
-        r_pass = st.text_input("בחר סיסמה", type="password")
         
-        if st.button("שלח בקשה להרשמה"):
-            if r_name and r_phone and r_pass:
-                ok, msg = register_user(r_name, r_phone, r_apt, r_type, r_pass)
-                if ok: st.success(msg)
-                else: st.error(msg)
+        # --- 1. פונקציית Callback לטיפול בהרשמה ---
+        def handle_registration():
+            # שולפים את הנתונים ישירות מה-State
+            name = st.session_state.reg_name
+            phone = st.session_state.reg_phone
+            apt = st.session_state.reg_apt
+            user_type = st.session_state.reg_type
+            password = st.session_state.reg_pass
+            
+            # בדיקת תקינות
+            if name and phone and password:
+                # קריאה לפונקציית ההרשמה
+                ok, msg = register_user(name, phone, apt, user_type, password)
+                
+                if ok:
+                    # שמירת הודעת הצלחה בזיכרון להצגה
+                    st.session_state['reg_message'] = ('success', msg)
+                    
+                    # איפוס השדות - מותר לעשות את זה כאן כי אנחנו בתוך Callback!
+                    st.session_state.reg_name = ""
+                    st.session_state.reg_phone = ""
+                    st.session_state.reg_apt = 1
+                    st.session_state.reg_type = "בעל דירה"
+                    st.session_state.reg_pass = ""
+                else:
+                    # שמירת הודעת שגיאה
+                    st.session_state['reg_message'] = ('error', msg)
             else:
-                st.error("נא למלא את כל השדות")
+                st.session_state['reg_message'] = ('error', "נא למלא את כל השדות")
+
+        # --- 2. ציור הטופס ---
+        st.text_input("שם מלא", key="reg_name")
+        st.text_input("טלפון", key="reg_phone")
+        st.number_input("מספר דירה", min_value=1, max_value=49, step=1, key="reg_apt")
+        st.selectbox("אני...", ["בעל דירה", "שוכר"], key="reg_type")
+        st.text_input("בחר סיסמה", type="password", key="reg_pass")
+        
+        # כפתור עם קישור לפונקציה (on_click)
+        st.button("שלח בקשה להרשמה", on_click=handle_registration)
+
+        # --- 3. הצגת הודעות (אם יש) ---
+        if 'reg_message' in st.session_state:
+            msg_type, msg_text = st.session_state['reg_message']
+            if msg_type == 'success':
+                st.success(msg_text)
+            else:
+                st.error(msg_text)
+            
+            # מחיקת ההודעה כדי שלא תופיע שוב סתם בריענון הבא
+            del st.session_state['reg_message']
 
 # --- המערכת פנימה ---
 else:
@@ -271,35 +614,26 @@ else:
     is_admin = user.get('Role') in ['admin', 'committee']
     
     st.sidebar.title(f"שלום, {user['Full Name']}")
-    st.sidebar.write(f"דירה: {user['Apt']}")
     
-    menu = st.sidebar.radio("תפריט", ["לוח שנה ושיריון", "השיריונים שלי", "ניהול"] if is_admin else ["לוח שנה ושיריון", "השיריונים שלי"])
+    # תפריט מותאם לפי תפקיד
+    if is_admin:
+        menu_opts = ["לוח שנה ושיריון", "השיריונים שלי", "ניהול - בקשות", "ניהול - משתמשים", "ניהול - מתקדם"]
+    else:
+        menu_opts = ["לוח שנה ושיריון", "השיריונים שלי"]
+        
+    menu = st.sidebar.radio("תפריט", menu_opts)
     
-    # === כפתור התנתק חסין תקלות ===
+    # כפתור התנתק (אותו קוד מהתיקון הקודם)
     if st.sidebar.button("התנתק"):
-        # 1. דריסת העוגיה (זה החלק הכי חשוב שמונע חיבור מחדש)
-        try:
-            cookie_manager.set("logged_user_phone", "", key="logout_overwrite")
-        except:
-            pass 
-
-        # 2. נסיון מחיקה עטוף בהגנה כדי למנוע את ה-KeyError
-        try:
-            cookie_manager.delete("logged_user_phone")
-        except KeyError:
-            pass
-        except Exception as e:
-            print(f"Logout error: {e}")
-
-        # 3. איפוס הסשן והדלקת דגל יציאה
+        cookie_manager.set("logged_user_phone", "")
+        try: cookie_manager.delete("logged_user_phone")
+        except: pass
         st.session_state.logout_clicked = True
         st.session_state.user = None
-        
-        # 4. השהייה וריענון
         tm.sleep(0.5)
         st.rerun()
 
-    # --- לוח שנה ---
+    # --- 1. לוח שנה ושיריון (ללא שינוי מהותי) ---
     if menu == "לוח שנה ושיריון":
         st.header("📅 יומן תפוסה ושיריון")
         col_form, col_calendar = st.columns([1, 3], gap="small")
@@ -311,77 +645,279 @@ else:
                     d = st.date_input("תאריך", min_value=datetime.today())
                     s = st.time_input("התחלה", time(18,0))
                     e = st.time_input("סיום", time(20,0))
-                    
                     if st.form_submit_button("שלח בקשה"):
                         apt = user.get('Apt', '0')
-                        ok, msg = add_booking(user, d, s, e)
+                        # שימוש בפונקציה המעודכנת
+                        ok, msg = add_booking(user, d, s, e, is_maintenance=False)
                         if ok: st.success(msg)
                         else: st.error(msg)
             
+            # מקרא צבעים קטן
+            st.info("💡 ירוק = שיריון רגיל | צהוב = חג | שחור/אפור = חסום")
+
         with col_calendar:
+            # הגדרות לוח שנה
             calendar_opts = {
-                "headerToolbar": {"left": "title", "center": "", "right": "dayGridMonth,timeGridWeek,prev,next"},
+                "headerToolbar": {"left": "title", "center": "", "right": "prev,next"},
                 "initialView": "dayGridMonth",
-                "locale": "he",
-                "direction": "rtl",
-                "height": 650,
-                "contentHeight": "auto"
+                "locale": "he", "direction": "rtl",
+                "height": "auto", "contentHeight": "auto", "aspectRatio": 1.2
             }
+            calendar(events=get_calendar_events(), options=calendar_opts)
             
-            calendar(events=get_calendar_events(), options=calendar_opts, custom_css="""
-    .fc { background: white; padding: 10px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); color: #000000; }
-    .fc-event-time { display: none !important; }
-    .fc-event-title { white-space: pre-wrap !important; text-align: right; display: block; font-weight: bold; }
-""")
-
-    # --- השיריונים שלי ---
+# --- 2. השיריונים שלי (עם עריכה וביטול) ---
     elif menu == "השיריונים שלי":
-        st.header("ההיסטוריה שלי")
+        st.header(f"היסטוריית דירה {user.get('Apt', '?')}")
         df = get_data("Bookings")
-        if not df.empty:
-            my_phone = str(user['Phone']).replace("'","")
-            df['User Phone'] = df['User Phone'].astype(str).str.replace("'","")
-            my_b = df[df['User Phone'] == my_phone]
-            if not my_b.empty:
-                st.dataframe(my_b[['Date', 'Start Time', 'End Time', 'Status']], use_container_width=True, hide_index=True)
-            else:
-                st.info("אין לך שיריונים")
-
-    # --- ניהול ---
-    elif menu == "ניהול" and is_admin:
-        st.header("🛠️ פאנל ניהול")
-        tab_users, tab_books = st.tabs(["משתמשים", "בקשות שיריון"])
         
-        with tab_users:
-            users = get_data("Users")
-            pending = users[users['Status'] == STATUS_PENDING]
-            if not pending.empty:
-                st.subheader("ממתינים לאישור")
-                for _, row in pending.iterrows():
-                    c1, c2 = st.columns([3, 1])
-                    c1.warning(f"{row['Full Name']} (דירה {row['Apt']})")
-                    if c2.button("אשר", key=f"u_ok_{row['Phone']}"):
-                        update_status_safe("Users", "Phone", str(row['Phone']).replace("'",""), 6, STATUS_ACTIVE)
+        if not df.empty:
+            user_apt = str(user.get('Apt', '')).strip()
+            if 'Apt' in df.columns:
+                df['Apt'] = df['Apt'].astype(str).str.strip()
+                # מציג שיריונים של הדירה (מאושרים, ממתינים, או ממתינים לעריכה)
+                # הוספנו את STATUS_EDIT_PENDING כדי שיראו גם בקשות עריכה של הדירה
+                my_bookings = df[(df['Apt'] == user_apt) & (df['Status'].isin([STATUS_APPROVED, STATUS_PENDING, STATUS_EDIT_PENDING]))]
+                
+                if not my_bookings.empty:
+                    # מיין לפי תאריך (הכי קרוב למעלה)
+                    my_bookings = my_bookings.sort_values(by='Date', ascending=False)
+                    
+                    for _, row in my_bookings.iterrows():
+                        with st.container(border=True):
+                            c1, c2, c3 = st.columns([3, 2, 2])
+                            
+                            # פרטי השיריון
+                            if row['Status'] == STATUS_PENDING:
+                                status_icon = "⏳ ממתין"
+                            elif row['Status'] == STATUS_EDIT_PENDING:
+                                status_icon = "📝 בעריכה"
+                            else:
+                                status_icon = "✅ מאושר"
+                                
+                            c1.write(f"**{row['Date']}** | {row['Start Time']}-{row['End Time']}")
+                            c1.caption(f"{status_icon} | הוזמן ע\"י: {row['Name']}")
+                            
+                            # חישוב האם השיריון עתידי
+                            try:
+                                booking_datetime = datetime.strptime(f"{row['Date']} {row['Start Time']}", "%Y-%m-%d %H:%M")
+                                is_future = booking_datetime > datetime.now()
+                            except: is_future = False
+
+                            if is_future:
+                                c_edit, c_cancel = st.columns([1, 5])
+                                
+                                # --- כפתור עריכה (הלוגיקה המתוקנת) ---
+                                with c_edit:
+                                    # אם השיריון כבר בסטטוס עריכה - חוסמים עריכה נוספת
+                                    if row['Status'] == STATUS_EDIT_PENDING:
+                                        st.caption("ממתין...")
+                                    else:
+                                        with st.popover("✏️"): # כפתור קטן עם עיפרון
+                                            st.write("עריכת שיריון")
+                                            # המרת מחרוזות לאובייקטים
+                                            curr_d = datetime.strptime(row['Date'], DATE_FMT).date()
+                                            curr_s = datetime.strptime(row['Start Time'], TIME_FMT).time()
+                                            curr_e = datetime.strptime(row['End Time'], TIME_FMT).time()
+                                            
+                                            with st.form(f"edit_form_{row['Booking ID']}"):
+                                                new_d = st.date_input("תאריך", value=curr_d)
+                                                new_s = st.time_input("התחלה", value=curr_s)
+                                                new_e = st.time_input("סיום", value=curr_e)
+                                                
+                                                if st.form_submit_button("עדכן"):
+                                                    # --- כאן התיקון שלך ---
+                                                    if is_admin:
+                                                        # אדמין: מעדכן מיד
+                                                        ok, msg = edit_existing_booking(row['Booking ID'], new_d, new_s, new_e)
+                                                    else:
+                                                        # משתמש רגיל: שולח בקשה לאישור
+                                                        ok, msg = request_edit_booking(user, row['Booking ID'], new_d, new_s, new_e)
+                                                    
+                                                    if ok:
+                                                        st.success(msg)
+                                                        tm.sleep(1.5)
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(msg)
+
+                                # --- כפתור ביטול ---
+                                with c_cancel:
+                                    if st.button("🗑️", key=f"cncl_{row['Booking ID']}"): # כפתור קטן עם פח
+                                        if update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, "cancelled_by_user"):
+                                            st.success("בוטל!")
+                                            st.rerun()
+                            else:
+                                # שיריון עבר
+                                st.write("") 
+                else:
+                    st.info("אין שיריונים פעילים לדירה זו")
+            else:
+                st.error("חסרה עמודת Apt בנתונים")
+
+    # --- 3. ניהול בקשות משודרג (כולל עריכות) ---
+    elif menu == "ניהול - בקשות" and is_admin:
+        st.header("ניהול בקשות")
+        books = get_data("Bookings")
+        
+        # הפרדה בין בקשות חדשות לבקשות עריכה
+        pending_new = books[books['Status'] == STATUS_PENDING]
+        pending_edit = books[books['Status'] == STATUS_EDIT_PENDING]
+        
+        # --- א. בקשות עריכה/שינוי ---
+        if not pending_edit.empty:
+            st.subheader("✏️ בקשות לשינוי מועד")
+            for _, row in pending_edit.iterrows():
+                # מציאת השיריון המקורי כדי להציג השוואה
+                orig_id = str(row.get('LinkedID', '')).strip()
+                orig_row = books[books['Booking ID'] == orig_id]
+                
+                with st.container(border=True):
+                    st.write(f"👤 **{row['Name']}** (דירה {row['Apt']}) מבקש לשנות:")
+                    
+                    c_old, c_arrow, c_new = st.columns([2, 1, 2])
+                    
+                    # הצגת הישן מול החדש
+                    if not orig_row.empty:
+                        orig = orig_row.iloc[0]
+                        c_old.error(f"מבוטל:\n{orig['Date']}\n{orig['Start Time']}-{orig['End Time']}")
+                    else:
+                        c_old.write("שיריון מקורי לא נמצא")
+                        
+                    c_arrow.markdown("<h2 style='text-align: center;'>⬅️</h2>", unsafe_allow_html=True)
+                    c_new.success(f"חדש:\n{row['Date']}\n{row['Start Time']}-{row['End Time']}")
+                    
+                    # כפתורי פעולה
+                    b1, b2 = st.columns(2)
+                    if b1.button("✅ אשר שינוי", key=f"app_ed_{row['Booking ID']}"):
+                        ok, msg = approve_edit_request(row['Booking ID'], orig_id)
+                        if ok: 
+                            send_telegram(f"✅ בקשת השינוי של {row['Name']} אושרה!")
+                            st.success(msg)
+                            st.rerun()
+                            
+                    if b2.button("❌ דחה שינוי", key=f"rej_ed_{row['Booking ID']}"):
+                        # דחייה פשוט מבטלת את הבקשה החדשה, הישן נשאר בתוקף
+                        update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_REJECTED)
                         st.rerun()
             st.divider()
-            with st.expander("כל המשתמשים"):
-                st.dataframe(users)
 
-        with tab_books:
-            books = get_data("Bookings")
-            pending_b = books[books['Status'] == STATUS_PENDING]
-            if not pending_b.empty:
-                st.subheader("בקשות שיריון ממתינות")
-                for _, row in pending_b.iterrows():
-                    with st.container(border=True):
-                        st.write(f"**{row['Date']}** | {row['Name']} (דירה {row['Apt']}) | {row['Start Time']}-{row['End Time']}")
-                        c1, c2 = st.columns(2)
-                        if c1.button("✅ אשר", key=f"b_ok_{row['Booking ID']}"):
-                            update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_APPROVED)
-                            send_telegram(f"✅ השיריון של {row['Name']} אושר!")
+        # --- ב. בקשות שיריון רגילות (חדשות) ---
+        if not pending_new.empty:
+            st.subheader("📅 בקשות שיריון חדשות")
+            for _, row in pending_new.iterrows():
+                with st.container(border=True):
+                    st.write(f"**{row['Date']}** | {row['Name']} (דירה {row['Apt']})")
+                    st.write(f"⏰ {row['Start Time']} - {row['End Time']}")
+                    c1, c2 = st.columns(2)
+                    if c1.button("✅ אשר", key=f"adm_ok_{row['Booking ID']}"):
+                        update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_APPROVED)
+                        send_telegram(f"✅ השיריון של {row['Name']} אושר!")
+                        st.rerun()
+                    if c2.button("❌ דחה", key=f"adm_no_{row['Booking ID']}"):
+                        update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_REJECTED)
+                        st.rerun()
+        
+        if pending_new.empty and pending_edit.empty:
+            st.success("אין בקשות ממתינות לאישור 🎉")
+
+   # --- 4. ניהול משתמשים (כולל מחיקה מלאה) ---
+    elif menu == "ניהול - משתמשים" and is_admin:
+        st.header("ניהול משתמשים")
+        users = get_data("Users")
+        
+        # אישורים
+        pending = users[users['Status'] == STATUS_PENDING]
+        if not pending.empty:
+            st.subheader("🔔 ממתינים")
+            for _, row in pending.iterrows():
+                c1, c2 = st.columns([3, 1])
+                c1.warning(f"{row['Full Name']} (דירה {row['Apt']})")
+                if c2.button("אשר", key=f"u_ok_{row['Phone']}"):
+                    update_status_safe("Users", "Phone", str(row['Phone']).replace("'",""), 6, STATUS_ACTIVE)
+                    st.rerun()
+            st.divider()
+
+        # עריכה ומחיקה
+        st.subheader("✏️ עריכה / מחיקת דייר")
+        
+        # יצירת לייבל לבחירה
+        users['SelectLabel'] = users['Full Name'].astype(str) + " (" + users['Phone'].astype(str) + ")"
+        user_select = st.selectbox("בחר דייר", users['SelectLabel'].tolist())
+        
+        if user_select:
+            user_to_edit = users[users['SelectLabel'] == user_select].iloc[0]
+            orig_phone = str(user_to_edit['Phone']).replace("'","")
+            
+            with st.form("edit_user_admin"):
+                st.write(f"משתמש: **{user_to_edit['Full Name']}**")
+                
+                c1, c2 = st.columns(2)
+                new_n = c1.text_input("שם", value=user_to_edit['Full Name'])
+                new_p = c2.text_input("טלפון", value=orig_phone)
+                c3, c4 = st.columns(2)
+                new_a = c3.text_input("דירה", value=str(user_to_edit['Apt']))
+                new_t = c4.selectbox("סוג", ["בעל דירה", "שוכר"], index=0 if user_to_edit['Type'] == "בעל דירה" else 1)
+                
+                new_pass = st.text_input("סיסמה", value=str(user_to_edit['Password']))
+                
+                col_save, col_del = st.columns([1, 1])
+                
+                # כפתור שמירה (ירוק)
+                with col_save:
+                    if st.form_submit_button("💾 שמור שינויים"):
+                        if update_user_details_admin(orig_phone, new_n, new_p, new_a, new_t, new_pass):
+                            st.success("עודכן!")
+                            tm.sleep(1)
                             st.rerun()
-                        if c2.button("❌ דחה", key=f"b_no_{row['Booking ID']}"):
-                            update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_REJECTED)
-                            st.rerun()
+                        else:
+                            st.error("שגיאה")
+
+            # כפתור מחיקה (אדום - מחוץ לטופס כדי למנוע סגירה)
+            st.markdown("---")
+            st.write("🗑️ **אזור מסוכן**")
+            with st.expander("מחיקת משתמש לצמיתות"):
+                st.error("פעולה זו תמחק את המשתמש וגם את כל השיריונים העתידיים וההיסטוריים שלו!")
+                if st.button("מחק את המשתמש והנתונים שלו", type="primary"):
+                    ok, msg = delete_user_fully_admin(orig_phone)
+                    if ok:
+                        st.success(msg)
+                        tm.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+    # --- 5. ניהול מתקדם (חסימות וסטטיסטיקה) ---
+    elif menu == "ניהול - מתקדם" and is_admin:
+        st.header("🛠️ כלים מתקדמים")
+        
+        tab_block, tab_stats = st.tabs(["⛔ חסימת תאריכים", "📊 סטטיסטיקות"])
+        
+        # --- טאב חסימה ---
+        with tab_block:
+            st.write("כאן ניתן לחסום תאריכים לשיפוצים או תחזוקה.")
+            with st.form("block_date_form"):
+                b_date = st.date_input("תאריך לחסימה")
+                b_start = st.time_input("התחלה", time(0,0))
+                b_end = st.time_input("סיום", time(23,59))
+                
+                if st.form_submit_button("חסום זמן זה"):
+                    # קריאה ל-add_booking עם דגל מיוחד
+                    ok, msg = add_booking({}, b_date, b_start, b_end, is_maintenance=True)
+                    if ok: st.success("התאריך נחסם בהצלחה")
+                    else: st.error(msg)
+        
+        # --- טאב סטטיסטיקות ---
+        with tab_stats:
+            st.subheader("דשבורד שימוש")
+            apt_stats, day_stats = get_stats_data()
+            
+            if apt_stats is not None:
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.write("**הזמנות לפי דירה**")
+                    st.bar_chart(apt_stats.set_index('דירה'))
+                with c2:
+                    st.write("**הזמנות לפי יום בשבוע**")
+                    st.bar_chart(day_stats.set_index('יום'))
             else:
-                st.success("אין בקשות שיריון חדשות")
+                st.info("אין מספיק נתונים לסטטיסטיקה")
