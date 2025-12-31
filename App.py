@@ -29,7 +29,8 @@ STATUS_ACTIVE = "active"
 
 # --- ניהול עוגיות (Cookie Manager) ---
 def get_cookie_manager():
-    return stx.CookieManager(key="auth_cookie_manager")
+    # שינינו את המפתח לגרסה v2 כדי לאפס זיכרונות ישנים בדפדפן
+    return stx.CookieManager(key="auth_cookie_manager_v2")
 
 cookie_manager = get_cookie_manager()
 
@@ -193,16 +194,16 @@ load_css("style.css")
 
 if 'user' not in st.session_state: st.session_state.user = None
 
-# === בדיקת עוגיות (Auto Login) - גרסה משופרת ===
+# === בדיקת עוגיות (Auto Login) ===
+# כאן התיקון: אנחנו בודקים אם הרגע לחצנו על יציאה לפני שמנסים להתחבר שוב
 if st.session_state.user is None:
-    # אם לחצנו על התנתק, נדלג על הבדיקה ונאפס את הדגל לפעם הבאה
     if st.session_state.get('logout_clicked', False):
         st.session_state.logout_clicked = False
     else:
-        # קריאת העוגיה
+        # אנו ממתינים רגע קטן כדי לוודא שה-Component נטען
         cookie_phone = cookie_manager.get(cookie="logged_user_phone")
         
-        # התיקון: מוודאים שהעוגיה קיימת וגם שהיא לא סתם טקסט ריק
+        # מוודאים שהעוגיה קיימת ולא ריקה
         if cookie_phone and str(cookie_phone).strip() != "":
             users_db = get_data("Users")
             if not users_db.empty:
@@ -215,7 +216,7 @@ if st.session_state.user is None:
 
 # --- מסך התחברות / הרשמה ---
 if not st.session_state.user:
-    st.title("🏡 פורטל הבניין")
+    st.title("🏡 פורטל הבניין (v2)")
     tab1, tab2 = st.tabs(["כניסה", "הרשמה"])
     
     with tab1:
@@ -233,6 +234,7 @@ if not st.session_state.user:
                     
                     # === שמירת עוגיה תקינה ===
                     clean_phone_cookie = str(l_phone).strip().replace("-", "").replace(" ", "")
+                    # התיקון: שימוש ב-timedelta
                     expires = datetime.now() + timedelta(days=7)
                     
                     cookie_manager.set("logged_user_phone", clean_phone_cookie, expires_at=expires)
@@ -273,20 +275,28 @@ else:
     
     menu = st.sidebar.radio("תפריט", ["לוח שנה ושיריון", "השיריונים שלי", "ניהול"] if is_admin else ["לוח שנה ושיריון", "השיריונים שלי"])
     
-    # === כפתור התנתק משופר ===
+    # === כפתור התנתק חסין תקלות ===
     if st.sidebar.button("התנתק"):
-        # 1. דריסת העוגיה עם ערך ריק (הכי חשוב!)
-        cookie_manager.set("logged_user_phone", "", key="logout_overwrite")
-        
-        # 2. שליחת פקודת מחיקה ליתר ביטחון
-        cookie_manager.delete("logged_user_phone")
-        
+        # 1. דריסת העוגיה (זה החלק הכי חשוב שמונע חיבור מחדש)
+        try:
+            cookie_manager.set("logged_user_phone", "", key="logout_overwrite")
+        except:
+            pass 
+
+        # 2. נסיון מחיקה עטוף בהגנה כדי למנוע את ה-KeyError
+        try:
+            cookie_manager.delete("logged_user_phone")
+        except KeyError:
+            pass
+        except Exception as e:
+            print(f"Logout error: {e}")
+
         # 3. איפוס הסשן והדלקת דגל יציאה
         st.session_state.logout_clicked = True
         st.session_state.user = None
         
-        # 4. השהייה ארוכה יותר (3 שניה) לתת לדפדפן זמן לעכל
-        tm.sleep(3)
+        # 4. השהייה וריענון
+        tm.sleep(0.5)
         st.rerun()
 
     # --- לוח שנה ---
