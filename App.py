@@ -70,16 +70,24 @@ def get_worksheet(name):
     sh = client.open_by_key(SHEET_ID)
     return sh.worksheet(name)
 
+@st.cache_data(ttl=300) # TTL=300 אומר שגוגל ייקרא רק פעם ב-5 דקות
 def get_data(sheet_name):
-    ws = get_worksheet(sheet_name)
-    # שימוש ב-values כדי להתגבר על בעיות כותרות/הקפאה
-    all_values = ws.get_all_values()
-    if not all_values: return pd.DataFrame()
-    
-    # ניקוי רווחים מהכותרות בשורה הראשונה
-    headers = [str(h).strip() for h in all_values[0]]
-    df = pd.DataFrame(all_values[1:], columns=headers)
-    return df
+    try:
+        ws = get_worksheet(sheet_name)
+        # שימוש ב-values כדי להתגבר על בעיות כותרות/הקפאה
+        all_values = ws.get_all_values()
+        if not all_values: return pd.DataFrame()
+        
+        # ניקוי רווחים מהכותרות בשורה הראשונה
+        headers = [str(h).strip() for h in all_values[0]]
+        df = pd.DataFrame(all_values[1:], columns=headers)
+        return df
+    except Exception as e:
+        # אם יש חסימה מגוגל, האפליקציה לא תקרוס אלא תציג שגיאה ידידותית
+        st.error("השרת עמוס זמנית, אנא נסה שוב בעוד דקה.")
+        return pd.DataFrame()
+
+
 
 # --- לוגיקה ---
 def login_user(phone, password):
@@ -509,13 +517,12 @@ def approve_edit_request(new_booking_id, original_booking_id):
 
 
 
-
-
-
 # --- האפליקציה הראשית ---
 st.set_page_config(page_title="ניהול חדר דיירים", layout="wide")
 
 load_css("style.css")
+
+cookie_manager = get_cookie_manager()
 
 if 'user' not in st.session_state: st.session_state.user = None
 
@@ -540,6 +547,22 @@ if st.session_state.user is None:
                     # מצאנו משתמש תואם לעוגיה - מחברים אותו
                     st.session_state.user = found_user.iloc[0].to_dict()
                     st.rerun()
+
+if st.session_state.user is None:
+    if st.session_state.get('logout_clicked', False):
+        pass 
+    else:
+        cookie_phone = cookie_manager.get(cookie="logged_user_phone")
+        if cookie_phone and len(str(cookie_phone)) > 5:
+            users_db = get_data("Users")
+            if not users_db.empty:
+                users_db['CleanPhone'] = users_db['Phone'].astype(str).str.replace("'", "").str.replace(" ", "")
+                found_user = users_db[users_db['CleanPhone'] == str(cookie_phone)]
+                if not found_user.empty:
+                    u_data = found_user.iloc[0].to_dict()
+                    if u_data.get('Status') == STATUS_ACTIVE:
+                        st.session_state.user = u_data
+                        st.rerun()
 
 # --- מסך התחברות / הרשמה ---
 if not st.session_state.user:
@@ -786,9 +809,10 @@ else:
             else:
                 st.error("חסרה עמודת Apt בנתונים")
 
-    # --- 3. ניהול בקשות משודרג (כולל עריכות) ---
+# --- 3. ניהול בקשות משודרג (כולל עריכות) ---
     elif menu == "ניהול - בקשות" and is_admin:
         st.header("ניהול בקשות")
+        # משיכת הנתונים (מוגן ב-TTL של 5 דקות)
         books = get_data("Bookings")
         
         # הפרדה בין בקשות חדשות לבקשות עריכה
@@ -799,16 +823,13 @@ else:
         if not pending_edit.empty:
             st.subheader("✏️ בקשות לשינוי מועד")
             for _, row in pending_edit.iterrows():
-                # מציאת השיריון המקורי כדי להציג השוואה
                 orig_id = str(row.get('LinkedID', '')).strip()
                 orig_row = books[books['Booking ID'] == orig_id]
                 
                 with st.container(border=True):
                     st.write(f"👤 **{row['Name']}** (דירה {row['Apt']}) מבקש לשנות:")
-                    
                     c_old, c_arrow, c_new = st.columns([2, 1, 2])
                     
-                    # הצגת הישן מול החדש
                     if not orig_row.empty:
                         orig = orig_row.iloc[0]
                         c_old.error(f"מבוטל:\n{orig['Date']}\n{orig['Start Time']}-{orig['End Time']}")
@@ -818,19 +839,22 @@ else:
                     c_arrow.markdown("<h2 style='text-align: center;'>⬅️</h2>", unsafe_allow_html=True)
                     c_new.success(f"חדש:\n{row['Date']}\n{row['Start Time']}-{row['End Time']}")
                     
-                    # כפתורי פעולה
                     b1, b2 = st.columns(2)
                     if b1.button("✅ אשר שינוי", key=f"app_ed_{row['Booking ID']}"):
                         ok, msg = approve_edit_request(row['Booking ID'], orig_id)
                         if ok: 
                             send_telegram(f"✅ בקשת השינוי של {row['Name']} אושרה!")
-                            st.success(msg)
+                            st.toast("בקשת השינוי אושרה!")
+                            tm.sleep(0.5)
+                            st.cache_data.clear() # ניקוי זיכרון כדי שהרשימה תתעדכן
                             st.rerun()
                             
                     if b2.button("❌ דחה שינוי", key=f"rej_ed_{row['Booking ID']}"):
-                        # דחייה פשוט מבטלת את הבקשה החדשה, הישן נשאר בתוקף
-                        update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_REJECTED)
-                        st.rerun()
+                        if update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_REJECTED):
+                            st.toast("השינוי נדחה")
+                            tm.sleep(0.5)
+                            st.cache_data.clear()
+                            st.rerun()
             st.divider()
 
         # --- ב. בקשות שיריון רגילות (חדשות) ---
@@ -841,32 +865,45 @@ else:
                     st.write(f"**{row['Date']}** | {row['Name']} (דירה {row['Apt']})")
                     st.write(f"⏰ {row['Start Time']} - {row['End Time']}")
                     c1, c2 = st.columns(2)
+                    
                     if c1.button("✅ אשר", key=f"adm_ok_{row['Booking ID']}"):
-                        update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_APPROVED)
-                        send_telegram(f"✅ השיריון של {row['Name']} אושר!")
-                        st.rerun()
+                        if update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_APPROVED):
+                            send_telegram(f"✅ השיריון של {row['Name']} אושר!")
+                            st.toast("השיריון אושר בהצלחה!")
+                            tm.sleep(0.5)
+                            st.cache_data.clear()
+                            st.rerun()
+                            
                     if c2.button("❌ דחה", key=f"adm_no_{row['Booking ID']}"):
-                        update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_REJECTED)
-                        st.rerun()
+                        if update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_REJECTED):
+                            st.toast("הבקשה נדחתה")
+                            tm.sleep(0.5)
+                            st.cache_data.clear()
+                            st.rerun()
         
         if pending_new.empty and pending_edit.empty:
             st.success("אין בקשות ממתינות לאישור 🎉")
 
-   # --- 4. ניהול משתמשים (כולל מחיקה מלאה) ---
+    # --- 4. ניהול משתמשים (כולל אישור מהיר) ---
     elif menu == "ניהול - משתמשים" and is_admin:
         st.header("ניהול משתמשים")
         users = get_data("Users")
         
-        # אישורים
         pending = users[users['Status'] == STATUS_PENDING]
         if not pending.empty:
-            st.subheader("🔔 ממתינים")
+            st.subheader("🔔 ממתינים לאישור כניסה")
             for _, row in pending.iterrows():
-                c1, c2 = st.columns([3, 1])
-                c1.warning(f"{row['Full Name']} (דירה {row['Apt']})")
-                if c2.button("אשר", key=f"u_ok_{row['Phone']}"):
-                    update_status_safe("Users", "Phone", str(row['Phone']).replace("'",""), 6, STATUS_ACTIVE)
-                    st.rerun()
+                with st.container(border=True):
+                    c1, c2 = st.columns([3, 1])
+                    c1.warning(f"{row['Full Name']} | דירה {row['Apt']} | {row['Phone']}")
+                    
+                    if c2.button("אשר דייר", key=f"u_ok_{row['Phone']}"):
+                        clean_phone = str(row['Phone']).replace("'","").strip()
+                        if update_status_safe("Users", "Phone", clean_phone, 6, STATUS_ACTIVE):
+                            st.toast(f"המשתמש {row['Full Name']} אושר!")
+                            tm.sleep(0.5)
+                            st.cache_data.clear()
+                            st.rerun()
             st.divider()
 
         # עריכה ומחיקה
