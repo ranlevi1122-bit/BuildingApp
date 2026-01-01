@@ -51,7 +51,7 @@
 
 /* אירועים בתוך הלוח */
 .fc-event-title {
-    white-space: nowrap !important;
+    /* white-space: nowrap !important; */
     font-size: 0.7em !important;
 }
 
