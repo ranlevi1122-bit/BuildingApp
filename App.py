@@ -342,7 +342,7 @@ def get_calendar_events():
         for _, row in approved.iterrows():
             current_apt = str(row.get('Apt', '?'))
             chosen_dot_color = apt_colors.get(current_apt, default_color)
-            event_title = f"דירה {current_apt}\n{row['Start Time']} - {row['End Time']}"
+            event_title = f"דירה {current_apt}\n{row['Start Time']}-{row['End Time']}"
             
             events.append({
                 "title": event_title,
@@ -712,12 +712,29 @@ else:
         with col_calendar:
             # הגדרות לוח שנה
             calendar_opts = {
-                "headerToolbar": {"left": "title", "center": "", "right": "prev,next"},
+                "headerToolbar": {"left": "", "center": "title", "right": "prev,next"},
                 "initialView": "dayGridMonth",
                 "locale": "he", "direction": "rtl",
-                "height": "auto", "contentHeight": "auto", "aspectRatio": 1.2
+                "height": "auto", "contentHeight": "auto", "aspectRatio": 1.2,
+                "displayEventTime": False,
             }
-            calendar(events=get_calendar_events(), options=calendar_opts)
+            custom_css = """
+        .fc-event-time {
+            display: none !important;
+        }
+        .fc-event-title {
+            display: block !important;
+            white-space: pre-line !important;
+            text-align: center !important;
+            line-height: 1.2 !important;
+            font-size: 0.85em !important;
+        }
+        .fc-daygrid-event {
+            display: block !important;
+            padding: 2px !important;
+        }
+    """
+            calendar(events=get_calendar_events(), options=calendar_opts, custom_css=custom_css)
             
 # --- 2. השיריונים שלי (עם עריכה וביטול) ---
     elif menu == "השיריונים שלי":

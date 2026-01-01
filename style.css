@@ -49,16 +49,33 @@
     font-size: 0.8em !important;
 }
 
-/* אירועים בתוך הלוח */
-.fc-event-title {
-    /* white-space: nowrap !important; */
-    font-size: 0.7em !important;
-}
-
-/* הסתרת זמן באירועים לחסכון במקום */
+/* ביטול השעה האוטומטית
 .fc-event-time {
     display: none !important;
 }
+
+/* הגדרת הקונטיינר של האירוע */
+/* .fc-daygrid-event {
+    white-space: normal !important;
+    display: block !important;
+} */
+
+/* הפתרון לירידת השורה */
+/* .fc-event-title {
+    display: flex !important;
+    flex-direction: column !important; /* מאלץ ירידת שורה */
+    /* white-space: pre-line !important; /* מכבד את ה-n\ */
+    /* text-align: center !important; */
+    /* font-size: 0.85em !important; */
+    /* line-height: 1.2 !important; */
+    /* padding: 2px 0 !important; */
+/* } */
+
+/* מוודא שהדיליי של ה-n\ יתפרס על פני כל הגובה */
+/* .fc-event-main { 
+    display: block !important;
+    overflow: visible !important;
+}  */
 
 /* 3. עיצוב טופס וכפתורים */
 div[data-testid="stForm"] {
