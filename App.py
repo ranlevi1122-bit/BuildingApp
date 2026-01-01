@@ -522,7 +522,6 @@ st.set_page_config(page_title="ניהול חדר דיירים", layout="wide")
 
 load_css("style.css")
 
-cookie_manager = get_cookie_manager()
 
 if 'user' not in st.session_state: st.session_state.user = None
 
