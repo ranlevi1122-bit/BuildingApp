@@ -894,16 +894,45 @@ else:
             for _, row in pending.iterrows():
                 with st.container(border=True):
                     c1, c2 = st.columns([3, 1])
-                    c1.warning(f"{row['Full Name']} | דירה {row['Apt']} | {row['Phone']}")
+                    # מנקים את מספר הטלפון מכל גרש או רווח לצורך התצוגה והחיפוש
+                    display_phone = str(row['Phone']).replace("'", "").strip()
+                    c1.warning(f"**{row['Full Name']}** | דירה {row['Apt']} | {display_phone}")
                     
-                    if c2.button("אשר דייר", key=f"u_ok_{row['Phone']}"):
-                        clean_phone = str(row['Phone']).replace("'","").strip()
-                        if update_status_safe("Users", "Phone", clean_phone, 6, STATUS_ACTIVE):
-                            st.toast(f"המשתמש {row['Full Name']} אושר!")
-                            tm.sleep(0.5)
-                            st.cache_data.clear()
-                            st.rerun()
-            st.divider()
+                    if c2.button("אשר דייר", key=f"u_ok_{display_phone}"):
+                        with st.spinner("מאשר משתמש..."):
+                            # אנחנו שולחים את הטלפון הנקי לחיפוש
+                            success = update_status_safe("Users", "Phone", display_phone, 6, STATUS_ACTIVE)
+                            
+                            if success:
+                                st.toast(f"המשתמש {row['Full Name']} אושר!")
+                                st.cache_data.clear()
+                                tm.sleep(1)
+                                st.rerun()
+                            else:
+                                # אם נכשל, ננסה שוב עם הגרש (למקרה שגוגל מחייב אותו)
+                                success_with_tick = update_status_safe("Users", "Phone", f"'{display_phone}", 6, STATUS_ACTIVE)
+                                if success_with_tick:
+                                    st.toast(f"המשתמש {row['Full Name']} אושר!")
+                                    st.cache_data.clear()
+                                    tm.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error("לא הצלחתי למצוא את המשתמש בגיליון. בדוק אם עמודת הסטטוס היא אכן מספר 6.")
+        # if not pending.empty:
+        #     st.subheader("🔔 ממתינים לאישור כניסה")
+        #     for _, row in pending.iterrows():
+        #         with st.container(border=True):
+        #             c1, c2 = st.columns([3, 1])
+        #             c1.warning(f"{row['Full Name']} | דירה {row['Apt']} | {row['Phone']}")
+                    
+        #             if c2.button("אשר דייר", key=f"u_ok_{row['Phone']}"):
+        #                 clean_phone = str(row['Phone']).replace("'","").strip()
+        #                 if update_status_safe("Users", "Phone", clean_phone, 6, STATUS_ACTIVE):
+        #                     st.toast(f"המשתמש {row['Full Name']} אושר!")
+        #                     tm.sleep(0.5)
+        #                     st.cache_data.clear()
+        #                     st.rerun()
+        #     st.divider()
 
         # עריכה ומחיקה
         st.subheader("✏️ עריכה / מחיקת דייר")
