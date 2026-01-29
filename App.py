@@ -44,16 +44,24 @@ def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
         if "gcp_service_account" in st.secrets:
+            # המרת ה-Secret לדיקשנרי אמיתי
             creds_dict = dict(st.secrets["gcp_service_account"])
-            # הזרקת התיקון: מבטיח שהמפתח הפרטי יפורמט נכון ב-Streamlit Cloud
+            
+            # תיקון קריטי: החלפת \n טקסטואלי בירידת שורה אמיתית אם קיים
             if "private_key" in creds_dict:
                 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
+            # יצירת ה-Credentials
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         else:
+            # עבודה לוקאלית
             creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
+            
         return gspread.authorize(creds)
     except Exception as e:
         st.error(f"שגיאה בחיבור לגוגל: {e}")
+        # הדפסת סוג השגיאה בלוגים של סטרימליט תעזור לך לדבג בעתיד
+        print(f"Detailed Error: {type(e).__name__}: {e}")
         st.stop()
 
 
@@ -1105,3 +1113,4 @@ else:
 
             else:
                 st.info("עדיין אין מספיק נתונים מאושרים להצגת סטטיסטיקה.")
+
