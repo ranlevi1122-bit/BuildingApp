@@ -44,24 +44,16 @@ def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
         if "gcp_service_account" in st.secrets:
-            # המרת ה-Secret לדיקשנרי אמיתי
             creds_dict = dict(st.secrets["gcp_service_account"])
-            
-            # תיקון קריטי: החלפת \n טקסטואלי בירידת שורה אמיתית אם קיים
+            # הזרקת התיקון: מבטיח שהמפתח הפרטי יפורמט נכון ב-Streamlit Cloud
             if "private_key" in creds_dict:
                 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-            
-            # יצירת ה-Credentials
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         else:
-            # עבודה לוקאלית
             creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
-            
         return gspread.authorize(creds)
     except Exception as e:
         st.error(f"שגיאה בחיבור לגוגל: {e}")
-        # הדפסת סוג השגיאה בלוגים של סטרימליט תעזור לך לדבג בעתיד
-        print(f"Detailed Error: {type(e).__name__}: {e}")
         st.stop()
 
 
@@ -129,60 +121,41 @@ def update_status_safe(sheet_name, id_col, item_id, status_col_idx, new_status):
         return True
     except: return False
 
-# --- שאר הפונקציות (get_calendar_events, add_booking וכו' - נשארות כפי שהן) ---
-# [כאן יש להמשיך עם הפונקציות הקיימות שלך מהקוד שעבד קודם]
-
-# --- 4. לוגיקה עסקית ---
-# def register_user(full_name, phone, apt, role, password):
-#     ws = get_worksheet("Users")
-#     users = get_data("Users")
-#     clean_phone = phone.strip()
-    
-#     if not users.empty and str(clean_phone) in users['Phone'].astype(str).values:
-#         return False, "הטלפון כבר קיים במערכת"
-
-#     hashed_pw = hash_password(password)
-#     ws.append_row([full_name, f"'{clean_phone}", str(apt), role, hashed_pw, STATUS_PENDING, "user"])
-#     st.cache_data.clear()
-    
-    send_telegram(f"🔔 *הרשמה חדשה*\nשם: {full_name}\nדירה: {apt}\nטלפון: {phone}")
-    return True, "בקשת ההרשמה נשלחה למנהל המערכת לאישור."
 
 def register_user(full_name, phone, apt, role, password):
-    ws = get_worksheet("Users")
-    users = get_data("Users")
-    clean_phone = str(phone).strip().replace("-", "").replace(" ", "").replace("'", "")
-    
-    # בדיקה 1: מניעת כפל טלפונים
-    if not users.empty:
-        users['CleanCheck'] = users['Phone'].astype(str).str.replace("'", "").str.replace("-", "").str.replace(" ", "")
-        if clean_phone in users['CleanCheck'].values:
-            return False, "מספר הטלפון הזה כבר רשום במערכת."
+    try:
+        ws = get_worksheet("Users")
+        users = get_data("Users")
+        clean_phone = str(phone).strip().replace("-", "").replace(" ", "").replace("'", "")
+        
+        # 1. בדיקת כפילות משודרגת
+        if not users.empty:
+            users['CleanCheck'] = users['Phone'].astype(str).str.replace("'", "").str.replace("-", "").str.replace(" ", "")
+            if clean_phone in users['CleanCheck'].values:
+                error_msg = "⚠️ מספר הטלפון הזה כבר רשום במערכת. יש ליצור קשר עם ועד הבית לקבלת הסיסמה או לצורך איפוס המשתמש."
+                st.error(error_msg) # הודעה אדומה קבועה על המסך
+                st.toast(error_msg, icon="🚫") # הודעה קופצת
+                
+                # השהייה של 5 שניות כדי שהמשתמש יספיק לקרוא
+                tm.sleep(7) 
+                return False, error_msg
 
-    # בדיקה 2: אישור אוטומטי - כתיבה כ-active במקום pending
-    ws.append_row([full_name, f"'{clean_phone}", str(apt), role, password, STATUS_ACTIVE, "user"])
-    st.cache_data.clear()
-    
-    send_telegram(f"✅ דייר חדש נרשם ואושר אוטומטית!\nשם: {full_name}\nדירה: {apt}")
-    return True, "נרשמת בהצלחה! ניתן להתחבר כעת."
+        # 2. הוספת השורה (כולל עמודת Is_New החדשה להתראה לאדמין)
+        # שם, טלפון, דירה, סוג, סיסמה, סטטוס, תפקיד, Is_New
+        new_row = [full_name, f"'{clean_phone}", str(apt), role, password, STATUS_ACTIVE, "user", "TRUE"]
+        
+        # שימוש ב-table_range='A1' מבטיח שהנתון יתווסף בדיוק בסוף הרשימה הקיימת
+        ws.append_row(new_row, value_input_option='USER_ENTERED', table_range='A1')
+        
+        # 3. ניקוי מטמון ועדכון אדמין
+        st.cache_data.clear()
+        send_telegram(f"🔔 דייר חדש נרשם בשיטס: {full_name}\nדירה: {apt}")
+        
+        return True, "נרשמת בהצלחה! ניתן להתחבר כעת."
+        
+    except Exception as e:
+        return False, f"שגיאה טכנית בתקשורת עם בסיס הנתונים: {e}"
 
-
-
-# def login_user(phone, password):
-#     users = get_data("Users")
-#     clean_input = str(phone).strip().replace("-", "").replace(" ", "")
-    
-#     if users.empty: return None
-    
-#     users['CleanPhone'] = users['Phone'].astype(str).str.replace("'", "").str.replace("-", "").str.replace(" ", "")
-#     user_row = users[users['CleanPhone'] == clean_input]
-    
-#     if user_row.empty: return None
-    
-#     stored_hash = user_row.iloc[0]['Password']
-#     if verify_password(password, stored_hash):
-#         return user_row.iloc[0].to_dict()
-#     return None
 
 def login_user(phone, password):
     users = get_data("Users")
@@ -202,6 +175,20 @@ def login_user(phone, password):
     if verify_password(password, stored_password):
         return user_row.iloc[0].to_dict()
     return None
+
+def reset_new_users_notifications():
+    try:
+        ws = get_worksheet("Users")
+        df = get_data("Users")
+        if 'Is_New' in df.columns:
+            # מוצאים את כל השורות שבהן Is_New הוא TRUE
+            # +2 כי אינדקס מתחיל מ-0 ושורה ראשונה היא כותרת
+            for idx, row in df.iterrows():
+                if str(row['Is_New']).upper() == 'TRUE':
+                    ws.update_cell(idx + 2, 8, "FALSE") # עמודה 8 היא Is_New
+            st.cache_data.clear()
+            return True
+    except: return False
 
 
 def check_overlap(date_str, start_str, end_str):
@@ -524,19 +511,6 @@ def approve_edit_request(new_booking_id, original_booking_id):
         return True, "השינוי בוצע בהצלחה"
     
     return False, "שגיאה במציאת השיריונים"
-
-def register_user(full_name, phone, apt, role, password):
-    # וודא שהשורה הזו קיימת ומחוץ להערה:
-    send_telegram(f"📢 *דייר חדש נרשם!*\nשם: {full_name}\nדירה: {apt}\nנא להיכנס לאפליקציה לאשר.")
-    return True, "נרשמת בהצלחה! ניתן להתחבר כעת."
-
-
-
-
-
-
-
-
 
 
 
@@ -1113,4 +1087,3 @@ else:
 
             else:
                 st.info("עדיין אין מספיק נתונים מאושרים להצגת סטטיסטיקה.")
-
