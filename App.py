@@ -5,6 +5,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, time, date, timedelta
 import requests
 import uuid
+import secrets as pysecrets
 import holidays
 from streamlit_calendar import calendar
 import extra_streamlit_components as stx
@@ -16,6 +17,94 @@ def load_css(file_name):
         with open(file_name, encoding='utf-8') as f:
             st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
     except: pass
+
+# --- רכיבי תצוגה משותפים ---
+def fmt_date(date_str):
+    try: return datetime.strptime(str(date_str), DATE_FMT).strftime('%d/%m/%Y')
+    except: return str(date_str)
+
+def fmt_range(start, end):
+    # התווים \u2066...\u2069 שומרים על "17:00–19:00" בסדר הנכון בתוך טקסט עברי
+    return f"\u2066{start}–{end}\u2069"
+
+def page_header(title, subtitle=None):
+    sub = f"<p>{subtitle}</p>" if subtitle else ""
+    st.markdown(f'<div class="page-head"><h1>{title}</h1>{sub}</div>', unsafe_allow_html=True)
+
+# פלטת צבעים רכה - כל דירה מקבלת צבע קבוע משלה (לפי מספר הדירה)
+APT_PALETTE = [
+    ("#DCEFE5", "#0F766E"), ("#E3EBFA", "#3559A8"), ("#FBE6DA", "#B4572A"),
+    ("#EFE3F7", "#7A45A8"), ("#DDF0F2", "#1F7A85"), ("#F8E1E6", "#A83A55"),
+    ("#F3E1E1", "#8B3A3A"), ("#E2E6EE", "#4A5568"),
+]
+MAINTENANCE_COLORS = ("#E6E3DD", "#6B6458")
+# זהב - שמור לחגים בלבד. אין להשתמש בצבע הזה לשום דבר אחר באפליקציה (סטטוסים, דירות, אזהרות)
+HOLIDAY_COLORS = ("#FDF3D3", "#C8960C")
+HOLIDAY_TEXT = "#6B4E00"
+# ימי זיכרון וצומות אינם חגים - לא מסמנים אותם
+NOT_HOLIDAYS = ("יום הזיכרון", "השואה", "תענית", "צום", "תשעה באב")
+
+@st.cache_data(ttl=86400)
+def get_jewish_holidays(year):
+    """{תאריך: שם החג בעברית} - חגים יהודיים בישראל, כולל חנוכה, פורים ול"ג בעומר."""
+    try:
+        il = holidays.IL(years=[year], categories=holidays.IL.supported_categories, language="he")
+    except Exception:
+        return {}
+    return {d: n for d, n in il.items() if not any(x in n for x in NOT_HOLIDAYS)}
+
+def holiday_on(day):
+    return get_jewish_holidays(day.year).get(day)
+
+def holiday_spans(days):
+    """מאחד ימים רצופים עם אותו חג: [(מיקום ראשון, אורך, שם או None)] לפי סדר הימים."""
+    spans, i = [], 0
+    while i < len(days):
+        name = holiday_on(days[i])
+        j = i
+        while name and j + 1 < len(days) and days[j + 1] == days[j] + timedelta(days=1) and holiday_on(days[j + 1]) == name:
+            j += 1
+        spans.append((i, j - i + 1, name))
+        i = j + 1
+    return spans
+
+def apt_colors(apt):
+    apt = str(apt).strip()
+    if apt in ("0", ""):
+        return MAINTENANCE_COLORS
+    try:
+        return APT_PALETTE[int(apt) % len(APT_PALETTE)]
+    except ValueError:
+        return APT_PALETTE[-1]
+
+# עיצוב לוח השנה - הלוח רץ בתוך iframe ולכן ה-CSS שלו מוזרק כאן ולא דרך style.css
+CALENDAR_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap');
+html, body { background: transparent; margin: 0; }
+.fc { font-family: 'Heebo', 'Segoe UI', Arial, sans-serif; color: #13302E; background: #FFFFFF;
+      border-radius: 14px; --fc-border-color: #E2ECEA;
+      --fc-today-bg-color: #CCEAE5; --fc-neutral-bg-color: #F5F8F7; }
+.fc .fc-toolbar.fc-header-toolbar { margin: 0 !important; padding: 12px 12px 10px; }
+.fc .fc-toolbar-title { font-size: 1.25rem !important; font-weight: 700; }
+.fc .fc-button { background: #FFFFFF !important; border: 1px solid #D5E6E3 !important;
+      color: #13302E !important; box-shadow: none !important; padding: 4px 10px !important;
+      border-radius: 10px !important; }
+.fc .fc-button:hover { border-color: #0F766E !important; color: #0F766E !important; }
+.fc .fc-col-header-cell-cushion { white-space: nowrap; font-size: 0.8rem; font-weight: 600;
+      color: #5B7471; text-decoration: none; padding: 6px 2px; }
+.fc .fc-daygrid-day-number { font-size: 0.85rem; color: #5B7471; text-decoration: none; padding: 6px 8px; }
+.fc .fc-day-today .fc-daygrid-day-number { color: #0F766E; font-weight: 700; }
+.fc .fc-day-other .fc-daygrid-day-number { opacity: 0.45; }
+.fc .fc-scrollgrid { border-radius: 10px; overflow: hidden; }
+.fc-event-time { display: none !important; }
+.fc .fc-daygrid-event { display: block !important; margin: 2px 3px !important; padding: 3px 4px !important;
+      border-radius: 6px !important; border-width: 0 3px 0 0 !important; }
+.fc .fc-bg-event.holiday-day { opacity: 1; }
+.fc .fc-daygrid-event.holiday { font-weight: 700; }
+.fc-event-title { display: block !important; white-space: pre-line !important; text-align: center !important;
+      line-height: 1.25 !important; font-size: 0.78em !important; font-weight: 600; }
+@media (max-width: 640px) { .fc .fc-toolbar.fc-header-toolbar { padding: 8px 6px; } .fc-event-title { font-size: 0.68em !important; } }
+"""
 
 # --- הגדרות ---
 SHEET_ID = '1Uf_bLdIKz8aJAc1BV1OZvQwNP5Rzn4LqnQSuhL9htjg' 
@@ -69,6 +158,85 @@ def send_telegram(message):
             requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=5)
     except Exception: 
         pass # מונע קריסה של כל האפליקציה אם יש תקלה בטלגרם
+
+# --- טלגרם אישי לכל דייר ---
+# כל דייר מחבר את הטלגרם שלו פעם אחת (מסך "השיריונים שלי"), וה-chat id נשמר בעמודה TelegramChatID בגיליון Users.
+# מרגע זה, אישור/דחייה של בקשה ע"י ועד הבית שולחים לו הודעה אישית.
+TG_COL = "TelegramChatID"
+
+def _tg_token():
+    try:
+        return st.secrets["general"]["telegram_token"]
+    except Exception:
+        return None
+
+def tg_api(method, **params):
+    """קריאה ל-Bot API. מחזירה את result, או None בכל תקלה (לעולם לא מפילה את האפליקציה)."""
+    token = _tg_token()
+    if not token:
+        return None
+    try:
+        r = requests.post(f"https://api.telegram.org/bot{token}/{method}", json=params, timeout=8)
+        data = r.json()
+        return data.get("result") if data.get("ok") else None
+    except Exception:
+        return None
+
+@st.cache_data(ttl=3600)
+def get_bot_username():
+    me = tg_api("getMe")
+    return me.get("username") if me else None
+
+def send_telegram_to(chat_id, message):
+    if chat_id and str(chat_id).strip():
+        return tg_api("sendMessage", chat_id=str(chat_id).strip(), text=message) is not None
+    return False
+
+def clean_phone(p):
+    return str(p).replace("'", "").replace("-", "").replace(" ", "").strip()
+
+def get_user_chat_id(phone):
+    users = get_data("Users")
+    if users.empty or TG_COL not in users.columns:
+        return None
+    match = users[users['Phone'].map(clean_phone) == clean_phone(phone)]
+    if match.empty:
+        return None
+    return str(match.iloc[0][TG_COL]).strip() or None
+
+def notify_resident(phone, message):
+    """שולח הודעה אישית לדייר שחיבר טלגרם. מחזיר True אם נשלחה."""
+    try:
+        return send_telegram_to(get_user_chat_id(phone), message)
+    except Exception:
+        return False
+
+def find_telegram_start(link_token):
+    """מחפש '/start <token>' שהדייר שלח לבוט, ומחזיר את ה-chat id שלו."""
+    # offset=-100: 100 העדכונים האחרונים בלבד, כך שהודעה חדשה תמיד נמצאת
+    updates = tg_api("getUpdates", offset=-100, allowed_updates=["message"]) or []
+    for u in reversed(updates):
+        msg = u.get("message") or {}
+        if str(msg.get("text", "")).strip() == f"/start {link_token}":
+            return str(msg["chat"]["id"])
+    return None
+
+def save_user_chat_id(phone, chat_id):
+    ws = get_worksheet("Users")
+    headers = [str(h).strip() for h in ws.row_values(1)]
+    if TG_COL in headers:
+        col = headers.index(TG_COL) + 1
+    else:
+        col = len(headers) + 1
+        ws.update_cell(1, col, TG_COL)  # יצירת העמודה בפעם הראשונה
+    cell = ws.find(f"'{phone}")
+    if not cell:
+        cell = ws.find(phone)
+    if not cell:
+        return False
+    ws.update_cell(cell.row, col, str(chat_id))
+    st.cache_data.clear()
+    return True
 
 def get_worksheet(name):
     client = get_gspread_client()
@@ -329,32 +497,40 @@ def get_stats_data():
 
 def get_calendar_events():
     events = []
-    apt_colors = { "13": "#FF5733", "1": "#33FF57", "5": "#3357FF" }
-    default_color = "#3E3080"
 
-    try:
-        for date_obj, name in holidays.IL(years=datetime.now().year).items():
-            events.append({
-                "title": f"🇮🇱 {name}", "start": str(date_obj), "end": str(date_obj),
-                "allDay": True, "backgroundColor": "#FFEB3B", "textColor": "#000000", "borderColor": "#FBC02D"
-            })
-    except: pass
+    # חגים: צביעת הימים עצמם (background) + פס עם שם החג שמתפרס על כל ימי החג
+    hol_bg, hol_line = HOLIDAY_COLORS
+    this_year = date.today().year
+    all_days = [date(this_year, 1, 1) + timedelta(days=k) for k in range((date(this_year + 1, 12, 31) - date(this_year, 1, 1)).days + 1)]
+    for first, length, name in holiday_spans(all_days):
+        if not name:
+            continue
+        start = all_days[first].isoformat()
+        end = (all_days[first] + timedelta(days=length)).isoformat()   # end בלעדי
+        events.append({"start": start, "end": end, "allDay": True, "display": "background",
+                       "backgroundColor": hol_bg, "classNames": ["holiday-day"]})
+        events.append({"title": f"✡ {name}", "start": start, "end": end, "allDay": True,
+                       "backgroundColor": hol_bg, "borderColor": hol_line, "textColor": HOLIDAY_TEXT,
+                       "classNames": ["holiday"]})
 
     df = get_data("Bookings")
     if not df.empty:
         approved = df[df['Status'] == STATUS_APPROVED]
         for _, row in approved.iterrows():
-            current_apt = str(row.get('Apt', '?'))
-            chosen_dot_color = apt_colors.get(current_apt, default_color)
-            event_title = f"דירה {current_apt}\n{row['Start Time']}-{row['End Time']}"
-            
+            current_apt = str(row.get('Apt', '?')).strip()
+            bg, line = apt_colors(current_apt)
+            label = "תחזוקה" if current_apt == "0" else f"דירה {current_apt}"
+            # התווים ⁦...⁩ שומרים על סדר השעות משמאל לימין בתוך טקסט עברי
+            event_title = f"{label}\n⁦{row['Start Time']}–{row['End Time']}⁩"
+
             events.append({
                 "title": event_title,
                 "start": f"{row['Date']}T{row['Start Time']}",
                 "end": f"{row['Date']}T{row['End Time']}",
-                "backgroundColor": "#FFFFFF", 
-                "borderColor": chosen_dot_color, 
-                "textColor": "#080808"
+                "display": "block",
+                "backgroundColor": bg,
+                "borderColor": line,
+                "textColor": "#13302E"
             })
     return events
 
@@ -514,6 +690,203 @@ def approve_edit_request(new_booking_id, original_booking_id):
 
 
 
+# --- מסך שיריון: רצועת ימים ושעות פנויות ---
+OPEN_HOUR, CLOSE_HOUR = 8, 24   # שעות הפעילות של החדר (שעה אחרונה: 23:00-24:00). שנו כאן לפי הצורך
+DAY_NAMES = ['שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת', 'ראשון']   # לפי date.weekday()
+DAY_SHORT = ['ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳', 'א׳']
+
+def slot_bounds(h):
+    end = time(23, 59) if h + 1 >= 24 else time(h + 1, 0)
+    return time(h, 0), end
+
+def fmt_hour_range(a, b):
+    """טווח שעות לתצוגה: משבצות a עד b כולל"""
+    return fmt_range(f"{a:02d}:00", f"{(b + 1) % 24:02d}:00")
+
+def day_occupancy(day):
+    """{שעה: (דירה, סטטוס)} לכל משבצת שעה תפוסה ביום הזה (מאושר, ממתין או בקשת שינוי)."""
+    taken = {}
+    bookings = get_data("Bookings")
+    if bookings.empty:
+        return taken
+    rows = bookings[(bookings['Date'] == day.strftime(DATE_FMT)) &
+                    (bookings['Status'].isin([STATUS_APPROVED, STATUS_PENDING, STATUS_EDIT_PENDING]))]
+    for _, r in rows.iterrows():
+        try:
+            s = datetime.strptime(r['Start Time'], TIME_FMT).time()
+            e = datetime.strptime(r['End Time'], TIME_FMT).time()
+        except ValueError:
+            continue
+        for h in range(OPEN_HOUR, CLOSE_HOUR):
+            hs, he = slot_bounds(h)
+            if s < he and e > hs:
+                taken[h] = (str(r.get('Apt', '')).strip(), r['Status'])
+    return taken
+
+def pick_slot(day_str, h, taken_hours):
+    """לחיצה על שעה פנויה: מתחילה בחירה, מאריכה אותה, או מתחילה מחדש."""
+    sel = st.session_state.get('slot_sel')
+    if not sel or sel[0] != day_str:
+        st.session_state.slot_sel = (day_str, h, h)
+        return
+    _, a, b = sel
+    if a == b == h:
+        st.session_state.slot_sel = None              # לחיצה שנייה על אותה שעה מבטלת
+    elif a <= h <= b:
+        st.session_state.slot_sel = (day_str, h, h)   # לחיצה בתוך הטווח מתחילה מחדש
+    else:
+        na, nb = min(a, h), max(b, h)
+        if any(x in taken_hours for x in range(na, nb + 1)):
+            st.session_state.slot_sel = (day_str, h, h)
+            st.toast("אי אפשר לדלג על שעה תפוסה - התחלנו בחירה חדשה", icon="↩️")
+        else:
+            st.session_state.slot_sel = (day_str, na, nb)
+
+def render_booking_screen(user):
+    today = date.today()
+    week = st.session_state.setdefault('week_offset', 0)
+    first = today + timedelta(days=7 * week)
+    days = [first + timedelta(days=i) for i in range(7)]
+
+    # ניווט בין שבועות
+    with st.container(horizontal=True, horizontal_alignment="distribute", vertical_alignment="center", key="week_nav"):
+        if st.button("→ שבוע קודם", key="week_prev", disabled=week == 0):
+            st.session_state.week_offset = week - 1
+            st.rerun()
+        st.markdown(f"**{fmt_range(f'{days[0]:%d/%m}', f'{days[-1]:%d/%m}')}**")
+        if st.button("שבוע הבא ←", key="week_next", disabled=week >= 8):
+            st.session_state.week_offset = week + 1
+            st.rerun()
+
+    # רצועת ימים
+    day_str = st.segmented_control(
+        "יום", [d.isoformat() for d in days], default=days[0].isoformat(), required=True,
+        format_func=lambda iso: f"{DAY_SHORT[date.fromisoformat(iso).weekday()]} {date.fromisoformat(iso).day}",
+        key=f"day_pick_{week}", label_visibility="collapsed", width="stretch",
+    )
+    day = date.fromisoformat(day_str)
+
+    # חגים בשבוע המוצג: סימון זהב על הימים + פס עם שם החג שמתפרס על ימי החג
+    spans = holiday_spans(days)
+    if any(name for _, _, name in spans):
+        hol_bg, hol_line = HOLIDAY_COLORS
+        sel = f".st-key-day_pick_{week} [data-testid='stButtonGroup'] button"
+        css = "".join(
+            f"{sel}:nth-of-type({k + 1}) {{ box-shadow: inset 0 -4px 0 {hol_line}; }}"
+            f"{sel}:nth-of-type({k + 1})[aria-checked='false'], {sel}:nth-of-type({k + 1})[aria-pressed='false'] {{ background: {hol_bg}; }}"
+            for first, length, name in spans if name for k in range(first, first + length)
+        )
+        cells = "".join(
+            f'<div class="hol-band" style="grid-column: span {length}">✡ {name}</div>' if name
+            else f'<div style="grid-column: span {length}"></div>'
+            for _, length, name in spans
+        )
+        st.markdown(f'<style>{css}</style><div class="hol-row">{cells}</div>', unsafe_allow_html=True)
+
+    with st.container(border=True, key="card_slots"):
+        hol = holiday_on(day)
+        title = f"{'היום · ' if day == today else ''}יום {DAY_NAMES[day.weekday()]} {day:%d/%m}"
+        st.markdown(f"#### {title}")
+        if hol:
+            st.markdown(f'<div style="text-align:center"><span class="pill pill-holiday">✡ {hol}</span></div>', unsafe_allow_html=True)
+
+        taken = day_occupancy(day)
+        now = datetime.now()
+        sel = st.session_state.get('slot_sel')
+        if sel and sel[0] != day_str:
+            sel = None
+        free_count = 0
+
+        with st.container(horizontal=True, wrap=True, gap="small", key="slot_grid"):
+            for h in range(OPEN_HOUR, CLOSE_HOUR):
+                label = fmt_hour_range(h, h)
+                key = f"slot_{day_str}_{h}"
+                if h in taken:
+                    apt, status = taken[h]
+                    who = "תחזוקה" if apt == "0" else ("ממתין" if status != STATUS_APPROVED else f"דירה {apt}")
+                    st.button(f"{label} · {who}", key=key, disabled=True)
+                elif datetime.combine(day, slot_bounds(h)[0]) <= now:
+                    st.button(label, key=key, disabled=True)
+                else:
+                    free_count += 1
+                    chosen = bool(sel) and sel[1] <= h <= sel[2]
+                    st.button(label, key=key, type="primary" if chosen else "secondary",
+                              on_click=pick_slot, args=(day_str, h, tuple(taken)))
+
+        if sel:
+            start, _ = slot_bounds(sel[1])
+            _, end = slot_bounds(sel[2])
+            if st.button(f"בקשת שיריון · {fmt_hour_range(sel[1], sel[2])}", type="primary",
+                         use_container_width=True, key="book_cta"):
+                ok, msg = add_booking(user, day, start, end, is_maintenance=False)
+                if ok:
+                    st.session_state.slot_sel = None
+                    st.session_state.booking_flash = f"הבקשה ליום {DAY_NAMES[day.weekday()]} {day:%d/%m}, {fmt_hour_range(sel[1], sel[2])}, נשלחה לוועד הבית"
+                    st.rerun()
+                else:
+                    st.error(msg)
+        elif free_count == 0:
+            st.info("אין שעות פנויות ביום הזה - נסו יום אחר")
+        else:
+            st.caption("לחצו על שעה פנויה כדי להתחיל, ועל שעה נוספת כדי להאריך את הטווח")
+
+    flash = st.session_state.pop('booking_flash', None)
+    if flash:
+        st.success(flash)
+        if get_user_chat_id(user.get('Phone', '')):
+            st.caption("🔔 נשלח לכם עדכון בטלגרם ברגע שהבקשה תאושר")
+        elif _tg_token():
+            st.caption("רוצים הודעה בטלגרם כשהבקשה מאושרת? חברו טלגרם במסך \"השיריונים שלי\"")
+
+    # תצוגת חודש (לבקשה)
+    if st.toggle("הצגת לוח חודשי", key="show_month"):
+        st.markdown(
+            f'<div class="legend">'
+            f'<span><i style="background:{APT_PALETTE[0][1]}"></i><i style="background:{APT_PALETTE[1][1]}"></i><i style="background:{APT_PALETTE[2][1]}"></i>שיריון - צבע לכל דירה</span>'
+            f'<span><i style="background:{HOLIDAY_COLORS[1]}"></i>חג</span>'
+            f'<span><i style="background:{MAINTENANCE_COLORS[1]}"></i>תחזוקה / חסום</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        calendar_opts = {
+            "headerToolbar": {"left": "", "center": "title", "right": "prev,next"},
+            "initialView": "dayGridMonth",
+            "locale": "he", "direction": "rtl",
+            "height": "auto", "contentHeight": "auto", "aspectRatio": 1.2,
+            "displayEventTime": False,
+            "fixedWeekCount": False,
+        }
+        calendar(events=get_calendar_events(), options=calendar_opts, custom_css=CALENDAR_CSS, key="main_calendar")
+
+def render_telegram_card(user):
+    phone = clean_phone(user.get('Phone', ''))
+    if not _tg_token() or not phone or phone == 'admin':
+        return
+    with st.container(border=True, key="card_telegram"):
+        if get_user_chat_id(phone):
+            st.markdown("**🔔 התראות בטלגרם פעילות**")
+            st.caption("תקבלו הודעה בטלגרם ברגע שוועד הבית מאשר או דוחה בקשה שלכם.")
+            return
+        st.markdown("**🔔 קבלו הודעה בטלגרם כשהבקשה מאושרת**")
+        bot = get_bot_username()
+        if not bot:
+            st.caption("החיבור לטלגרם לא זמין כרגע.")
+            return
+        token = st.session_state.setdefault('tg_link_token', pysecrets.token_urlsafe(9))
+        st.caption("פתחו את הבוט ולחצו Start, ואז חזרו לכאן ולחצו \"בדיקת חיבור\"")
+        with st.container(horizontal=True, gap="small", key="tg_actions"):
+            st.link_button("פתיחת הבוט בטלגרם", f"https://t.me/{bot}?start={token}", type="primary")
+            check = st.button("בדיקת חיבור", key="tg_check")
+        if check:
+            chat = find_telegram_start(token)
+            if chat and save_user_chat_id(phone, chat):
+                send_telegram_to(chat, "✅ חוברתם להתראות חדר הדיירים. נעדכן אתכם כאן כשוועד הבית מאשר בקשה.")
+                st.session_state.pop('tg_link_token', None)
+                st.toast("טלגרם חובר", icon="✅")
+                st.rerun()
+            else:
+                st.warning("עוד לא קיבלנו את ה-Start מהבוט. ודאו שלחצתם Start בטלגרם ונסו שוב.")
+
 # --- האפליקציה הראשית ---
 st.set_page_config(page_title="ניהול חדר דיירים", layout="wide")
 
@@ -562,205 +935,161 @@ if st.session_state.user is None:
 
 # --- מסך התחברות / הרשמה ---
 if not st.session_state.user:
-    st.title("🏡 מערכת לניהול חדר דיירים (v2)")
-    tab1, tab2 = st.tabs(["כניסה", "הרשמה"])
-    
-    with tab1:
-        l_phone = st.text_input("טלפון נייד")
-        l_pass = st.text_input("סיסמה", type="password")
-        if st.button("התחבר"):
-            if l_phone == "admin" and l_pass == "admin123":
-                 st.session_state.user = {'Role': 'admin', 'Full Name': 'מנהל על', 'Apt': '0', 'Phone': 'admin'}
-                 st.rerun()
-            
-            user = login_user(l_phone, l_pass)
-            if user:
-                if user['Status'] == STATUS_ACTIVE:
-                    st.session_state.user = user
-                    
-                    # === שמירת עוגיה תקינה ===
-                    clean_phone_cookie = str(l_phone).strip().replace("-", "").replace(" ", "")
-                    # התיקון: שימוש ב-timedelta
-                    expires = datetime.now() + timedelta(days=7)
-                    
-                    cookie_manager.set("logged_user_phone", clean_phone_cookie, expires_at=expires)
-                    
-                    tm.sleep(0.5) 
-                    st.rerun()
-                    
-                elif user['Status'] == STATUS_PENDING:
-                    st.warning("⏳ המשתמש ממתין לאישור מנהל")
-                else:
-                    st.error("🚫 משתמש חסום")
-            else:
-                st.error("פרטים שגויים")
+    _, auth_col, _ = st.columns([1, 1.4, 1])
+    with auth_col:
+        st.markdown(
+            '<div class="brand-hero"><div class="logo">🏡</div>'
+            '<h1>חדר הדיירים</h1><p>שיריון וניהול חדר הדיירים · שדרות לכיש 129</p></div>',
+            unsafe_allow_html=True,
+        )
+        tab1, tab2 = st.tabs(["כניסה", "הרשמה"])
 
-    with tab2:
-        st.info("מלא את הפרטים ונשלח בקשה למנהל")
-        
-        # --- 1. פונקציית Callback לטיפול בהרשמה ---
-        def handle_registration():
-            # שולפים את הנתונים ישירות מה-State
-            name = st.session_state.reg_name
-            phone = st.session_state.reg_phone
-            apt = st.session_state.reg_apt
-            user_type = st.session_state.reg_type
-            password = st.session_state.reg_pass
+        with tab1:
+            l_phone = st.text_input("טלפון נייד", placeholder="050-0000000")
+            l_pass = st.text_input("סיסמה", type="password")
+            if st.button("התחבר", type="primary", use_container_width=True):
+                if l_phone == "admin" and l_pass == "admin123":
+                     st.session_state.user = {'Role': 'admin', 'Full Name': 'מנהל על', 'Apt': '0', 'Phone': 'admin'}
+                     st.rerun()
             
-            # בדיקת תקינות
-            if name and phone and password:
-                # קריאה לפונקציית ההרשמה
-                ok, msg = register_user(name, phone, apt, user_type, password)
+                user = login_user(l_phone, l_pass)
+                if user:
+                    if user['Status'] == STATUS_ACTIVE:
+                        st.session_state.user = user
+                    
+                        # === שמירת עוגיה תקינה ===
+                        clean_phone_cookie = str(l_phone).strip().replace("-", "").replace(" ", "")
+                        # התיקון: שימוש ב-timedelta
+                        expires = datetime.now() + timedelta(days=7)
+                    
+                        cookie_manager.set("logged_user_phone", clean_phone_cookie, expires_at=expires)
+                    
+                        tm.sleep(0.5) 
+                        st.rerun()
+                    
+                    elif user['Status'] == STATUS_PENDING:
+                        st.warning("⏳ המשתמש ממתין לאישור מנהל")
+                    else:
+                        st.error("🚫 משתמש חסום")
+                else:
+                    st.error("פרטים שגויים")
+
+        with tab2:
+            st.info("מלא את הפרטים ונשלח בקשה למנהל")
+        
+            # --- 1. פונקציית Callback לטיפול בהרשמה ---
+            def handle_registration():
+                # שולפים את הנתונים ישירות מה-State
+                name = st.session_state.reg_name
+                phone = st.session_state.reg_phone
+                apt = st.session_state.reg_apt
+                user_type = st.session_state.reg_type
+                password = st.session_state.reg_pass
+            
+                # בדיקת תקינות
+                if name and phone and password:
+                    # קריאה לפונקציית ההרשמה
+                    ok, msg = register_user(name, phone, apt, user_type, password)
                 
-                if ok:
-                    # שמירת הודעת הצלחה בזיכרון להצגה
-                    st.session_state['reg_message'] = ('success', msg)
+                    if ok:
+                        # שמירת הודעת הצלחה בזיכרון להצגה
+                        st.session_state['reg_message'] = ('success', msg)
                     
-                    # איפוס השדות - מותר לעשות את זה כאן כי אנחנו בתוך Callback!
-                    st.session_state.reg_name = ""
-                    st.session_state.reg_phone = ""
-                    st.session_state.reg_apt = 1
-                    st.session_state.reg_type = "בעל דירה"
-                    st.session_state.reg_pass = ""
+                        # איפוס השדות - מותר לעשות את זה כאן כי אנחנו בתוך Callback!
+                        st.session_state.reg_name = ""
+                        st.session_state.reg_phone = ""
+                        st.session_state.reg_apt = 1
+                        st.session_state.reg_type = "בעל דירה"
+                        st.session_state.reg_pass = ""
+                    else:
+                        # שמירת הודעת שגיאה
+                        st.session_state['reg_message'] = ('error', msg)
                 else:
-                    # שמירת הודעת שגיאה
-                    st.session_state['reg_message'] = ('error', msg)
-            else:
-                st.session_state['reg_message'] = ('error', "נא למלא את כל השדות")
+                    st.session_state['reg_message'] = ('error', "נא למלא את כל השדות")
 
-        # --- 2. ציור הטופס ---
-        st.text_input("שם מלא", key="reg_name")
-        st.text_input("טלפון", key="reg_phone")
-        st.number_input("מספר דירה", min_value=1, max_value=49, step=1, key="reg_apt")
-        st.selectbox("אני...", ["בעל דירה", "שוכר"], key="reg_type")
-        st.text_input("בחר סיסמה", type="password", key="reg_pass")
+            # --- 2. ציור הטופס ---
+            st.text_input("שם מלא", key="reg_name")
+            st.text_input("טלפון", key="reg_phone")
+            st.number_input("מספר דירה", min_value=1, max_value=49, step=1, key="reg_apt")
+            st.selectbox("אני...", ["בעל דירה", "שוכר"], key="reg_type")
+            st.text_input("בחר סיסמה", type="password", key="reg_pass")
         
-        # כפתור עם קישור לפונקציה (on_click)
-        st.button("שלח בקשה להרשמה", on_click=handle_registration)
+            # כפתור עם קישור לפונקציה (on_click)
+            st.button("שלח בקשה להרשמה", on_click=handle_registration, type="primary", use_container_width=True)
         
 
-        # --- 3. הצגת הודעות (אם יש) ---
-        if 'reg_message' in st.session_state:
-            msg_type, msg_text = st.session_state['reg_message']
-            if msg_type == 'success':
-                st.success(msg_text)
-            else:
-                st.error(msg_text)
+            # --- 3. הצגת הודעות (אם יש) ---
+            if 'reg_message' in st.session_state:
+                msg_type, msg_text = st.session_state['reg_message']
+                if msg_type == 'success':
+                    st.success(msg_text)
+                else:
+                    st.error(msg_text)
             
-            # מחיקת ההודעה כדי שלא תופיע שוב סתם בריענון הבא
-            del st.session_state['reg_message']
+                # מחיקת ההודעה כדי שלא תופיע שוב סתם בריענון הבא
+                del st.session_state['reg_message']
 
 # --- המערכת פנימה ---
 else:
     user = st.session_state.user
     is_admin = user.get('Role') in ['admin', 'committee']
     
-    st.sidebar.title(f"שלום, {user['Full Name']}")
-    
-    # תפריט מותאם לפי תפקיד
-    # --- מערכת התראות לאדמין ב-Sidebar ---
+    full_name = str(user.get('Full Name', '')).strip() or "דייר"
+    role_label = "ועד הבית" if is_admin else f"דירה {user.get('Apt', '?')}"
+
+    # --- ספירת בקשות ממתינות (לאדמין) ---
+    pend_u_count = pend_b_count = 0
     if is_admin:
-        # שליפת נתונים עדכניים
         u_df = get_data("Users")
         b_df = get_data("Bookings")
-        
-        # ספירת בקשות שממתינות לטיפול
-        # משתמשים בסטטוס pending ובקשות עריכה בסטטוס edit_pending
         pend_u_count = len(u_df[u_df['Status'] == STATUS_PENDING]) if not u_df.empty else 0
-        pend_b_count = len(b_df[b_df['Status'] == STATUS_EDIT_PENDING]) if not b_df.empty else 0
-        
+        pend_b_count = len(b_df[b_df['Status'].isin([STATUS_PENDING, STATUS_EDIT_PENDING])]) if not b_df.empty else 0
         total_alerts = pend_u_count + pend_b_count
+        # התראה קופצת פעם אחת בלבד בכל כניסה (ולא בכל לחיצה)
+        if total_alerts > 0 and not st.session_state.get('admin_alert_shown'):
+            st.toast(f"יש {total_alerts} בקשות שממתינות לך", icon="📩")
+            st.session_state.admin_alert_shown = True
 
-        if total_alerts > 0:
-            st.sidebar.error(f"🔔 יש לך {total_alerts} בקשות חדשות לטיפול!")
-            # התראה קופצת למנהל ברגע הכניסה
-            st.toast(f"מנהל, יש {total_alerts} בקשות שממתינות לך", icon="📩")
-        
-        # עדכון שמות התפריט עם בועיות מספר (Badges)
-        u_label = f"ניהול - משתמשים {'🔴 ' + str(pend_u_count) if pend_u_count > 0 else ''}"
-        b_label = f"ניהול - בקשות {'🔴 ' + str(pend_b_count) if pend_b_count > 0 else ''}"
-        
-        menu_opts = ["לוח שנה ושיריון", "השיריונים שלי", b_label, u_label, "ניהול - מתקדם"]
-    else:
-        menu_opts = ["לוח שנה ושיריון", "השיריונים שלי"]
+    # --- שורה עליונה: המשתמש והתנתקות ---
+    with st.container(horizontal=True, horizontal_alignment="distribute", vertical_alignment="center", key="top_bar"):
+        st.markdown(
+            f'<div class="side-user"><div class="side-avatar">{full_name[0]}</div>'
+            f'<div><div class="side-name">שלום, {full_name}</div>'
+            f'<div class="side-meta">{role_label}</div></div></div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("התנתק", key="logout_btn"):
+            # 1. מחיקת העוגיה  2. איפוס ה-State  3. השהייה קצרה כדי שמחיקת העוגיה תגיע לדפדפן
+            cookie_manager.delete("logged_user_phone")
+            st.session_state.user = None
+            st.session_state.logout_clicked = True
+            for k in ('admin_alert_shown', 'slot_sel', 'tg_link_token', 'nav', 'last_nav', 'week_offset'):
+                st.session_state.pop(k, None)
+            st.cache_data.clear()
+            with st.spinner("מתנתק..."):
+                tm.sleep(1)
+            st.rerun()
 
-    menu = st.sidebar.radio("תפריט", menu_opts)
+    # --- ניווט עליון (במקום תפריט צד שמוסתר בנייד) ---
+    nav_labels = {"book": "📅 שיריון", "mine": "🗂️ השיריונים שלי"}
+    if is_admin:
+        nav_labels["requests"] = f"📥 בקשות{f' ({pend_b_count})' if pend_b_count else ''}"
+        nav_labels["users"] = f"👥 דיירים{f' ({pend_u_count})' if pend_u_count else ''}"
+        nav_labels["advanced"] = "🛠️ מתקדם"
+    menu = st.segmented_control(
+        "תפריט", list(nav_labels), format_func=nav_labels.get, default="book", required=True,
+        key="nav", label_visibility="collapsed", width="stretch",
+    ) or "book"
 
-    st.sidebar.markdown("---")
-
-    if st.sidebar.button("התנתק"):
-        # 1. מחיקת העוגיה
-        cookie_manager.delete("logged_user_phone")
-        # 2. איפוס ה-State
-        st.session_state.user = None
-        st.session_state.logout_clicked = True
-        # 3. ניקוי מטמון וספירה לאחור
-        st.cache_data.clear()
-        p = st.sidebar.empty()
-        for i in range(10, 0, -1):
-            p.warning(f"מתנתק בבטחה... {i}")
-            tm.sleep(1)
-        st.rerun()
-
-    st.sidebar.markdown("---")
-    st.sidebar.caption(f"© {datetime.now().year} כל הזכויות שמורות - רן לוי מוביל ועד הבית והאדמין")
-    st.sidebar.caption("פותח עבור בניין שדרות לכיש 129 🏡")
-
-    # --- 1. לוח שנה ושיריון (ללא שינוי מהותי) ---
-    if menu == "לוח שנה ושיריון":
-        st.header("📅 יומן תפוסה ושיריון")
-        col_form, col_calendar = st.columns([1, 3], gap="small")
-        
-        with col_form:
-            with st.container(border=True):
-                st.subheader("➕ שיריון מהיר")
-                with st.form("new_book_flex"):
-                    d = st.date_input("תאריך", min_value=datetime.today())
-                    s = st.time_input("התחלה", time(18,0))
-                    e = st.time_input("סיום", time(20,0))
-                    if st.form_submit_button("שלח בקשה"):
-                        apt = user.get('Apt', '0')
-                        # שימוש בפונקציה המעודכנת
-                        ok, msg = add_booking(user, d, s, e, is_maintenance=False)
-                        if ok:
-                            st.toast("השיריון בוצע ואושר אוטומטית! 🎉", icon='📅')
-                            tm.sleep(1) # נותן למשתמש זמן לראות את הבלון
-                            st.rerun()
-                        else: st.error(msg)
-            
-            # מקרא צבעים קטן
-            st.info("💡 ירוק = שיריון רגיל | צהוב = חג | שחור/אפור = חסום")
-
-        with col_calendar:
-            # הגדרות לוח שנה
-            calendar_opts = {
-                "headerToolbar": {"left": "", "center": "title", "right": "prev,next"},
-                "initialView": "dayGridMonth",
-                "locale": "he", "direction": "rtl",
-                "height": "auto", "contentHeight": "auto", "aspectRatio": 1.2,
-                "displayEventTime": False,
-            }
-            custom_css = """
-        .fc-event-time {
-            display: none !important;
-        }
-        .fc-event-title {
-            display: block !important;
-            white-space: pre-line !important;
-            text-align: center !important;
-            line-height: 1.2 !important;
-            font-size: 0.85em !important;
-        }
-        .fc-daygrid-event {
-            display: block !important;
-            padding: 2px !important;
-        }
-    """
-            calendar(events=get_calendar_events(), options=calendar_opts, custom_css=custom_css)
+    # --- 1. שיריון: רצועת ימים ושעות פנויות ---
+    if menu == "book":
+        page_header("שיריון חדר הדיירים", "בחרו יום ושעות פנויות - הבקשה תישלח לאישור ועד הבית")
+        render_booking_screen(user)
             
 # --- 2. השיריונים שלי (עם עריכה וביטול) ---
-    elif menu == "השיריונים שלי":
-        st.header(f"היסטוריית דירה {user.get('Apt', '?')}")
+    elif menu == "mine":
+        page_header("השיריונים שלי", f"כל השיריונים של דירה {user.get('Apt', '?')}")
+        render_telegram_card(user)
         df = get_data("Bookings")
         
         if not df.empty:
@@ -776,19 +1105,24 @@ else:
                     my_bookings = my_bookings.sort_values(by='Date', ascending=False)
                     
                     for _, row in my_bookings.iterrows():
-                        with st.container(border=True):
+                        with st.container(border=True, key=f"card_my_{row['Booking ID']}"):
                             c1, c2, c3 = st.columns([3, 2, 2])
                             
                             # פרטי השיריון
                             if row['Status'] == STATUS_PENDING:
-                                status_icon = "⏳ ממתין"
+                                status_pill = '<span class="pill pill-wait">⏳ ממתין לאישור</span>'
                             elif row['Status'] == STATUS_EDIT_PENDING:
-                                status_icon = "📝 בעריכה"
+                                status_pill = '<span class="pill pill-edit">📝 בקשת שינוי</span>'
                             else:
-                                status_icon = "✅ מאושר"
-                                
-                            c1.write(f"**{row['Date']}** | {row['Start Time']}-{row['End Time']}")
-                            c1.caption(f"{status_icon} | הוזמן ע\"י: {row['Name']}")
+                                status_pill = '<span class="pill pill-ok">✓ מאושר</span>'
+
+                            c1.markdown(
+                                f'<div class="booking-when">{fmt_date(row["Date"])} '
+                                f'<span class="booking-time">{row["Start Time"]}–{row["End Time"]}</span></div>',
+                                unsafe_allow_html=True,
+                            )
+                            c1.caption(f"הוזמן ע\"י {row['Name']}")
+                            c2.markdown(status_pill, unsafe_allow_html=True)
                             
                             # חישוב האם השיריון עתידי
                             try:
@@ -797,7 +1131,7 @@ else:
                             except: is_future = False
 
                             if is_future:
-                                c_edit, c_cancel = st.columns([1, 5])
+                                c_edit = c_cancel = c3.container(horizontal=True, gap="small", key=f"actions_{row['Booking ID']}")  # עריכה ומחיקה באותה שורה
                                 
                                 # --- כפתור עריכה (הלוגיקה המתוקנת) ---
                                 with c_edit:
@@ -817,7 +1151,7 @@ else:
                                                 new_s = st.time_input("התחלה", value=curr_s)
                                                 new_e = st.time_input("סיום", value=curr_e)
                                                 
-                                                if st.form_submit_button("עדכן"):
+                                                if st.form_submit_button("עדכן", use_container_width=True):
                                                     # --- כאן התיקון שלך ---
                                                     if is_admin:
                                                         # אדמין: מעדכן מיד
@@ -849,8 +1183,8 @@ else:
                 st.error("חסרה עמודת Apt בנתונים")
 
 # --- 3. ניהול בקשות משודרג (כולל עריכות) ---
-    elif "ניהול - בקשות" in menu and is_admin:
-        st.header("ניהול בקשות")
+    elif menu == "requests" and is_admin:
+        page_header("ניהול בקשות", "אישור או דחייה של בקשות שיריון ושינוי מועד")
         # משיכת הנתונים (מוגן ב-TTL של 5 דקות)
         books = get_data("Bookings")
         
@@ -865,32 +1199,34 @@ else:
                 orig_id = str(row.get('LinkedID', '')).strip()
                 orig_row = books[books['Booking ID'] == orig_id]
                 
-                with st.container(border=True):
+                with st.container(border=True, key=f"card_edit_{row['Booking ID']}"):
                     st.write(f"👤 **{row['Name']}** (דירה {row['Apt']}) מבקש לשנות:")
-                    c_old, c_arrow, c_new = st.columns([2, 1, 2])
+                    c_old, c_arrow, c_new = st.columns([2, 0.4, 2], vertical_alignment="center")
                     
                     if not orig_row.empty:
                         orig = orig_row.iloc[0]
-                        c_old.error(f"מבוטל:\n{orig['Date']}\n{orig['Start Time']}-{orig['End Time']}")
+                        c_old.error(f"**במקום:** {fmt_date(orig['Date'])} · {fmt_range(orig['Start Time'], orig['End Time'])}")
                     else:
                         c_old.write("שיריון מקורי לא נמצא")
                         
-                    c_arrow.markdown("<h2 style='text-align: center;'>⬅️</h2>", unsafe_allow_html=True)
-                    c_new.success(f"חדש:\n{row['Date']}\n{row['Start Time']}-{row['End Time']}")
+                    c_arrow.markdown("<h3 style='text-align: center; margin: 0.4rem 0;'>←</h3>", unsafe_allow_html=True)
+                    c_new.success(f"**מועד חדש:** {fmt_date(row['Date'])} · {fmt_range(row['Start Time'], row['End Time'])}")
                     
                     b1, b2 = st.columns(2)
-                    if b1.button("✅ אשר שינוי", key=f"app_ed_{row['Booking ID']}"):
+                    if b1.button("✓ אשר שינוי", key=f"app_ed_{row['Booking ID']}", type="primary", use_container_width=True):
                         ok, msg = approve_edit_request(row['Booking ID'], orig_id)
                         if ok: 
                             send_telegram(f"✅ בקשת השינוי של {row['Name']} אושרה!")
-                            st.toast("בקשת השינוי אושרה!")
+                            sent = notify_resident(row['Phone'], f"✅ שינוי המועד שלך אושר\nהמועד החדש: {fmt_date(row['Date'])} · {row['Start Time']}–{row['End Time']}")
+                            st.toast("בקשת השינוי אושרה" + (" · הדייר עודכן בטלגרם" if sent else ""))
                             tm.sleep(0.5)
                             st.cache_data.clear() # ניקוי זיכרון כדי שהרשימה תתעדכן
                             st.rerun()
                             
-                    if b2.button("❌ דחה שינוי", key=f"rej_ed_{row['Booking ID']}"):
+                    if b2.button("✕ דחה שינוי", key=f"rej_ed_{row['Booking ID']}", use_container_width=True):
                         if update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_REJECTED):
-                            st.toast("השינוי נדחה")
+                            sent = notify_resident(row['Phone'], f"❌ בקשת שינוי המועד ל-{fmt_date(row['Date'])} · {row['Start Time']}–{row['End Time']} לא אושרה.\nהשיריון המקורי שלך נשאר בתוקף.")
+                            st.toast("השינוי נדחה" + (" · הדייר עודכן בטלגרם" if sent else ""))
                             tm.sleep(0.5)
                             st.cache_data.clear()
                             st.rerun()
@@ -900,22 +1236,24 @@ else:
         if not pending_new.empty:
             st.subheader("📅 בקשות שיריון חדשות")
             for _, row in pending_new.iterrows():
-                with st.container(border=True):
-                    st.write(f"**{row['Date']}** | {row['Name']} (דירה {row['Apt']})")
-                    st.write(f"⏰ {row['Start Time']} - {row['End Time']}")
+                with st.container(border=True, key=f"card_req_{row['Booking ID']}"):
+                    st.markdown(f"**{fmt_date(row['Date'])}** · {fmt_range(row['Start Time'], row['End Time'])}")
+                    st.caption(f"{row['Name']} · דירה {row['Apt']}")
                     c1, c2 = st.columns(2)
                     
-                    if c1.button("✅ אשר", key=f"adm_ok_{row['Booking ID']}"):
+                    if c1.button("✓ אשר", key=f"adm_ok_{row['Booking ID']}", type="primary", use_container_width=True):
                         if update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_APPROVED):
                             send_telegram(f"✅ השיריון של {row['Name']} אושר!")
-                            st.toast("השיריון אושר בהצלחה!")
+                            sent = notify_resident(row['Phone'], f"✅ השיריון שלך לחדר הדיירים אושר\n{fmt_date(row['Date'])} · {row['Start Time']}–{row['End Time']}")
+                            st.toast("השיריון אושר" + (" · הדייר עודכן בטלגרם" if sent else ""))
                             tm.sleep(0.5)
                             st.cache_data.clear()
                             st.rerun()
                             
-                    if c2.button("❌ דחה", key=f"adm_no_{row['Booking ID']}"):
+                    if c2.button("✕ דחה", key=f"adm_no_{row['Booking ID']}", use_container_width=True):
                         if update_status_safe("Bookings", "Booking ID", row['Booking ID'], 7, STATUS_REJECTED):
-                            st.toast("הבקשה נדחתה")
+                            sent = notify_resident(row['Phone'], f"❌ בקשת השיריון שלך ל-{fmt_date(row['Date'])} · {row['Start Time']}–{row['End Time']} לא אושרה.\nאפשר לבחור מועד אחר באפליקציה.")
+                            st.toast("הבקשה נדחתה" + (" · הדייר עודכן בטלגרם" if sent else ""))
                             tm.sleep(0.5)
                             st.cache_data.clear()
                             st.rerun()
@@ -924,15 +1262,15 @@ else:
             st.success("אין בקשות ממתינות לאישור 🎉")
 
     # --- 4. ניהול משתמשים (כולל אישור מהיר) ---
-    elif "ניהול - משתמשים" in menu and is_admin:
-        st.header("ניהול משתמשים")
+    elif menu == "users" and is_admin:
+        page_header("ניהול משתמשים", "אישור דיירים חדשים, עריכה ומחיקה")
         users = get_data("Users")
         
         pending = users[users['Status'] == STATUS_PENDING]
         if not pending.empty:
             st.subheader("🔔 ממתינים לאישור כניסה")
             for _, row in pending.iterrows():
-                with st.container(border=True):
+                with st.container(border=True, key=f"card_user_{row['Phone']}"):
                     c1, c2 = st.columns([3, 1])
                     # מנקים את מספר הטלפון מכל גרש או רווח לצורך התצוגה והחיפוש
                     display_phone = str(row['Phone']).replace("'", "").strip()
@@ -1001,7 +1339,7 @@ else:
                 
                 # כפתור שמירה (ירוק)
                 with col_save:
-                    if st.form_submit_button("💾 שמור שינויים"):
+                    if st.form_submit_button("💾 שמור שינויים", use_container_width=True):
                         if update_user_details_admin(orig_phone, new_n, new_p, new_a, new_t, new_pass):
                             st.success("עודכן!")
                             tm.sleep(1)
@@ -1024,8 +1362,8 @@ else:
                         st.error(msg)
 
     # --- 5. ניהול מתקדם (חסימות וסטטיסטיקה) ---
-    elif menu == "ניהול - מתקדם" and is_admin:
-        st.header("🛠️ כלים מתקדמים")
+    elif menu == "advanced" and is_admin:
+        page_header("כלים מתקדמים", "חסימת זמנים לתחזוקה ונתוני שימוש")
         
         tab_block, tab_stats = st.tabs(["⛔ חסימת תאריכים", "📊 סטטיסטיקות"])
         
@@ -1037,7 +1375,7 @@ else:
                 b_start = st.time_input("התחלה", time(0,0))
                 b_end = st.time_input("סיום", time(23,59))
                 
-                if st.form_submit_button("חסום זמן זה"):
+                if st.form_submit_button("חסום זמן זה", use_container_width=True):
                     # קריאה ל-add_booking עם דגל מיוחד
                     ok, msg = add_booking({}, b_date, b_start, b_end, is_maintenance=True)
                     if ok: st.success("התאריך נחסם בהצלחה")
@@ -1072,12 +1410,12 @@ else:
                 with c1:
                     st.markdown("#### 📅 התפלגות עומס לפי ימים")
                     # שינוי צבע לגרף ימים - ירוק מותאם למותג
-                    st.bar_chart(day_stats.set_index('יום'), color="#43b249")
+                    st.bar_chart(day_stats.set_index('יום'), color="#0F766E")
                 
                 with c2:
                     st.markdown("#### 🏢 דירוג שימוש לפי דירה")
                     # שימוש בגרף אופקי (Horizontal) - נראה הרבה יותר טוב לשמות/מספרי דירה
-                    st.bar_chart(apt_stats.set_index('דירה'), horizontal=True, color="#3E3080")
+                    st.bar_chart(apt_stats.set_index('דירה'), horizontal=True, color="#3559A8")
 
                 # 4. תוספת הנדסית: טבלת הצרכנים הכבדים (Pareto)
                 with st.expander("👁️ צפה בנתוני גלם ופילוח אחוזי"):
@@ -1087,3 +1425,6 @@ else:
 
             else:
                 st.info("עדיין אין מספיק נתונים מאושרים להצגת סטטיסטיקה.")
+
+    st.divider()
+    st.caption(f"© {datetime.now().year} רן לוי · ועד הבית · פותח עבור בניין שדרות לכיש 129 🏡")

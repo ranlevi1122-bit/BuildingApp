@@ -1,9 +1,9 @@
-streamlit
+streamlit>=1.67.0
 pandas
 gspread
 oauth2client
 requests
 bcrypt
-holidays
+holidays>=0.60
 streamlit-calendar
 extra-streamlit-components

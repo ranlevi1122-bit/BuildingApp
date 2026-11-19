@@ -1,125 +1,370 @@
-/* style.css - מתוקן: פותר את בעיית התפריט והתצוגה בנייד */
+/* style.css - עיצוב אפליקציית חדר הדיירים
+   הצבעים והגופן הבסיסיים מוגדרים ב-.streamlit/config.toml.
+   כאן: כיווניות RTL, כרטיסים, כפתורים ורכיבים מותאמים.
+   (לוח השנה רץ בתוך iframe - העיצוב שלו נמצא ב-CALENDAR_CSS בתוך App.py) */
 
-/* 1. הגדרות שלד (פותר את בעיית תפריט ההמבורגר) */
-.stApp {
-    direction: ltr; /* משאירים את המסגרת LTR כדי שהתפריט יעבוד חלק */
-    background-color: #c0c0bb80;
-    font-family: 'Segoe UI', Tahoma, sans-serif;
+:root {
+    --brand: #0F766E;
+    --brand-dark: #0B5C56;
+    --brand-soft: #CCEAE5;
+    --ink: #13302E;
+    --muted: #5B7471;
+    --line: #D5E6E3;
+    --surface: #FFFFFF;
+    --canvas: #F5F8F7;
+    --holiday: #C8960C;       /* זהב - לחגים בלבד */
+    --holiday-soft: #FDF3D3;
+    --holiday-ink: #6B4E00;
+    --red: #C2453B;
+    --shadow: 0 1px 2px rgba(19, 48, 46, 0.04), 0 4px 16px rgba(19, 48, 46, 0.06);
 }
 
-/* הופכים רק את התוכן הפנימי לימין-שמאל */
+/* ---------- 0. שורה עליונה וניווט ---------- */
+.st-key-top_bar { padding-bottom: 0.25rem; }
+.st-key-top_bar .side-user { padding: 0; }
+
+.st-key-nav button p,
+[class*="st-key-day_pick_"] button p { font-weight: 600; white-space: nowrap; }
+
+[class*="st-key-day_pick_"] button { min-height: 3rem; }
+
+/* תפריט עליון ורצועת ימים ב-RTL: Streamlit מעגל את הפינות ומחפיף גבולות כאילו משמאל לימין,
+   ולכן הכפתור הראשון (הימני) קיבל את הפינות של השמאלי. הופכים: הימני מעוגל מימין, השמאלי משמאל */
+.st-key-nav [data-testid="stButtonGroup"] button,
+[class*="st-key-day_pick_"] [data-testid="stButtonGroup"] button {
+    border-radius: 0 !important;
+    margin-right: 0 !important;
+    margin-left: -1px !important;
+}
+.st-key-nav [data-testid="stButtonGroup"] button:first-of-type,
+[class*="st-key-day_pick_"] [data-testid="stButtonGroup"] button:first-of-type {
+    border-radius: 0 10px 10px 0 !important;
+}
+.st-key-nav [data-testid="stButtonGroup"] button:last-of-type,
+[class*="st-key-day_pick_"] [data-testid="stButtonGroup"] button:last-of-type {
+    border-radius: 10px 0 0 10px !important;
+    margin-left: 0 !important;
+}
+
+/* רצועת הימים: תמיד שורה אחת, 7 ימים ברוחב שווה (גם בנייד) */
+[class*="st-key-day_pick_"] [data-testid="stButtonGroup"] > div { flex-wrap: nowrap; }
+[class*="st-key-day_pick_"] [data-testid="stButtonGroup"] button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 4px 2px;
+}
+
+/* תווית של שעה תפוסה ("דירה 5") יורדת שורה במקום להיחתך */
+.st-key-slot_grid .stButton > button p { white-space: normal; line-height: 1.25; }
+
+/* ---------- משבצות שעה ---------- */
+.st-key-slot_grid > div { flex: 0 0 calc(25% - 12px); min-width: 0; }  /* 4 בשורה, רווח 16px */
+.st-key-slot_grid .stButton > button { width: 100%; min-height: 2.75rem; font-weight: 600; }
+.st-key-slot_grid .stButton > button:disabled {
+    background: #EEF3F2;
+    border: 1px dashed var(--line);
+    color: #7F9592;
+    opacity: 1;
+}
+.st-key-slot_grid .stButton > button[kind="primary"] {
+    background: var(--brand-soft);
+    border: 1.5px solid var(--brand);
+    color: #0B4F49;
+}
+.st-key-slot_grid .stButton > button[kind="primary"]:hover {
+    background: #B8E1DA;
+    color: #0B4F49;
+}
+
+@media (max-width: 640px) {
+    .st-key-slot_grid > div { flex: 0 0 calc(50% - 8px); }  /* 2 בשורה בנייד */
+    .st-key-nav button p { font-size: 0.85rem; }
+}
+
+/* ---------- 1. שלד וכיווניות: עברית מלאה, מימין לשמאל ---------- */
+/* האפליקציה כולה RTL (אין יותר תפריט צד שדרש מסגרת LTR) */
+html, body, .stApp {
+    direction: rtl;
+}
+
 .stMain .block-container {
     direction: rtl;
     text-align: right;
-    max-width: 100% !important;
-    padding: 2rem 1rem; /* רווח צדדי קטן יותר לנייד */
+    max-width: 1200px;
+    padding: 2.5rem 1.25rem 3rem;
 }
 
-/* הופכים את תפריט הצד */
-[data-testid="stSidebar"] {
+/* Streamlit מגדיר text-align: left על כל רכיב - start מכבד את הכיוון (ימין בעברית) */
+[data-testid="stElementContainer"],
+[data-testid="stMarkdownContainer"],
+[data-testid="stCaptionContainer"] {
+    text-align: start;
+}
+
+/* רכיבים שנפתחים מחוץ לעמוד: הודעות קופצות, רשימות בחירה, חלונית עריכה, לוח תאריכים */
+[data-testid="stToast"],
+[data-baseweb="popover"],
+[data-baseweb="menu"],
+[role="listbox"],
+[role="dialog"],
+[data-testid="stPopoverBody"] {
     direction: rtl;
     text-align: right;
 }
 
-/* הופכים את הכותרת העליונה (איפה שההמבורגר) */
-[data-testid="stHeader"] {
-    direction: rtl;
+/* ---------- כותרות: תמיד במרכז ---------- */
+.stMain h1, .stMain h2, .stMain h3, .stMain h4, .stMain h5,
+.page-head, .page-head p {
+    text-align: center;
 }
 
-/* 2. תיקון קריטי ללוח השנה בנייד (מונע שבירת מילים) */
-/* זה מה שיסדר את ה"ש\nב\nת" */
-.fc-col-header-cell-cushion {
-    white-space: nowrap !important; /* חובה! מונע ירידת שורה */
-    font-size: 0.75rem !important;  /* מקטין פונט שייכנס בנייד */
-    text-decoration: none !important;
+/* אייקון הקישור ש-Streamlit מוסיף ליד כותרת מזיז אותה מהמרכז */
+[data-testid="stHeaderActionElements"] {
+    display: none;
+}
+
+/* תאריכים, שעות, טלפונים ומספרים - תמיד משמאל לימין, אחרת "18:00" מוצג כ-"00:18" */
+[data-testid="stDateInput"] input,
+[data-testid="stTimeInput"] input,
+[data-testid="stTimeInputTimeDisplay"] [role="group"],
+[data-testid="stNumberInput"] input,
+input[type="tel"],
+.ltr {
+    direction: ltr;
+    unicode-bidi: plaintext;
+    text-align: right;
+}
+
+[data-testid="stTextInput"] input {
+    direction: rtl;
+    text-align: right;
+}
+
+/* ---------- 2. טיפוגרפיה ---------- */
+h1, h2, h3, h4, h5 {
+    color: var(--ink);
+    letter-spacing: -0.01em;
+}
+
+h1 { font-weight: 800 !important; }
+h2, h3 { font-weight: 700 !important; }
+
+[data-testid="stCaptionContainer"] {
+    color: var(--muted);
+}
+
+/* ---------- 3. כרטיסים ----------
+   כל st.container(border=True) מקבל key שמתחיל ב-"card_" ← Streamlit מוסיף מחלקה st-key-card_... */
+[class*="st-key-card_"],
+div[data-testid="stForm"] {
+    background: var(--surface);
+    border: 1px solid var(--line) !important;
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+}
+
+[class*="st-key-card_"] {
+    padding: 1rem 1.1rem;
+}
+
+div[data-testid="stForm"] {
+    padding: 1.1rem 1.1rem 0.6rem;
+}
+
+/* טופס בתוך כרטיס - בלי מסגרת כפולה */
+[class*="st-key-card_"] div[data-testid="stForm"] {
+    border: none !important;
+    box-shadow: none;
+    padding: 0;
+}
+
+/* ---------- 4. כפתורים ---------- */
+.stButton > button,
+.stFormSubmitButton > button {
+    border-radius: 10px;
+    font-weight: 600;
+    min-height: 2.75rem;
+    transition: background-color .15s ease, box-shadow .15s ease, transform .05s ease;
+}
+
+.stFormSubmitButton > button,
+.stButton > button[kind="primary"] {
+    background: var(--brand);
+    border: 1px solid var(--brand);
+    color: #fff;
     width: 100%;
+}
+
+.stFormSubmitButton > button:hover,
+.stButton > button[kind="primary"]:hover {
+    background: var(--brand-dark);
+    border-color: var(--brand-dark);
+    color: #fff;
+}
+
+.stButton > button[kind="secondary"] {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--ink);
+}
+
+.stButton > button[kind="secondary"]:hover {
+    border-color: var(--brand);
+    color: var(--brand);
+}
+
+.stButton > button:active,
+.stFormSubmitButton > button:active {
+    transform: translateY(1px);
+}
+
+/* ---------- 5. תפריט צד ---------- */
+[data-testid="stSidebar"] [role="radiogroup"] label {
+    padding: 0.45rem 0.6rem;
+    border-radius: 10px;
+    margin-bottom: 2px;
+    width: 100%;
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] label:hover {
+    background: var(--canvas);
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+    background: var(--brand-soft);
+    font-weight: 600;
+}
+
+.side-user {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.25rem 0 0.9rem;
+}
+
+.side-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: var(--brand);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.side-name { font-weight: 700; color: var(--ink); line-height: 1.2; }
+.side-meta { font-size: 0.85rem; color: var(--muted); }
+
+/* ---------- 6. כותרת עמוד ---------- */
+.page-head { margin: 0 0 1.25rem; }
+.page-head h1 { font-size: 1.9rem; margin: 0; padding: 0; }
+.page-head p { color: var(--muted); margin: 0.25rem 0 0; }
+
+/* ---------- 7. מסך כניסה ---------- */
+.brand-hero {
+    text-align: center;
+    padding: 1.5rem 0 1.25rem;
+}
+
+.brand-hero .logo {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 0.75rem;
+    border-radius: 18px;
+    background: var(--brand);
+    display: grid;
+    place-items: center;
+    font-size: 2rem;
+    box-shadow: var(--shadow);
+}
+
+.brand-hero h1 { font-size: 1.8rem; margin: 0; padding: 0; text-align: center; }
+.brand-hero p { color: var(--muted); margin: 0.3rem 0 0; text-align: center; }
+
+/* ---------- 8. תגיות סטטוס ומקרא ---------- */
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.15rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.pill-ok      { background: #E3F1EA; color: #1F6447; }
+.pill-wait    { background: #FDE8D7; color: #9A4A12; }   /* כתום: ממתין */
+.pill-holiday { background: var(--holiday-soft); color: var(--holiday-ink); border: 1px solid var(--holiday); }
+.pill-edit    { background: #E6EEFB; color: #2A4F95; }
+.pill-past    { background: #EEECE7; color: #6B7570; }
+
+.booking-when { font-weight: 700; font-size: 1.05rem; color: var(--ink); }
+.booking-time { direction: ltr; unicode-bidi: isolate; color: var(--muted); }
+
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+    padding: 0.25rem 0.1rem;
+}
+
+.legend span { display: inline-flex; align-items: center; gap: 0.3rem; }
+.legend i {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
     display: inline-block;
 }
+.legend i + i { margin-inline-start: -0.15rem; }
 
-/* הקטנת כותרת החודש בלוח */
-.fc-toolbar-title {
-    font-size: 1.1em !important;
+/* ---------- 9. מדדים (סטטיסטיקות) ---------- */
+[data-testid="stMetric"] {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1rem 1.1rem;
+    box-shadow: var(--shadow);
+}
+
+/* ---------- 10. לשוניות ---------- */
+[data-testid="stTabs"] [role="tablist"] {
+    gap: 0.25rem;
+}
+
+[data-testid="stTabs"] button[role="tab"] {
+    font-weight: 600;
+}
+
+/* ---------- 11. נייד ---------- */
+@media (max-width: 640px) {
+    .stMain .block-container { padding: 1.5rem 0.75rem 2rem; }
+    .page-head h1 { font-size: 1.5rem; }
+}
+
+/* ---------- חגים: פס זהב עם שם החג, מתפרס על ימי החג ברצועת הימים ---------- */
+.hol-row {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 0;
+    margin: -0.6rem 0 0.25rem;
+}
+.hol-band {
+    background: var(--holiday-soft);
+    color: var(--holiday-ink);
+    border: 1px solid var(--holiday);
+    border-radius: 0 0 10px 10px;
+    border-top: 0;
+    font-size: 0.8rem;
     font-weight: 700;
-    color: #000000;
-}
-
-/* כפתורים בלוח (קדימה/אחורה) */
-.fc-button {
-    padding: 2px 5px !important;
-    font-size: 0.8em !important;
-}
-
-/* ביטול השעה האוטומטית
-.fc-event-time {
-    display: none !important;
-}
-
-/* הגדרת הקונטיינר של האירוע */
-/* .fc-daygrid-event {
-    white-space: normal !important;
-    display: block !important;
-} */
-
-/* הפתרון לירידת השורה */
-/* .fc-event-title {
-    display: flex !important;
-    flex-direction: column !important; /* מאלץ ירידת שורה */
-    /* white-space: pre-line !important; /* מכבד את ה-n\ */
-    /* text-align: center !important; */
-    /* font-size: 0.85em !important; */
-    /* line-height: 1.2 !important; */
-    /* padding: 2px 0 !important; */
-/* } */
-
-/* מוודא שהדיליי של ה-n\ יתפרס על פני כל הגובה */
-/* .fc-event-main { 
-    display: block !important;
-    overflow: visible !important;
-}  */
-
-/* 3. עיצוב טופס וכפתורים */
-div[data-testid="stForm"] {
-    background-color: rgb(64, 59, 59);
-    padding: 10px;
-    border-radius: 15px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-}
-
-.stButton>button {
-    background-color: #43b249;
-    color: rgb(255, 255, 255);
-    border-radius: 8px;
-    border: none;
-    height: 3em;
-    font-weight: bold;
-    width: 100%;
-    margin-top: 10px;
-}
-.stButton>button:hover {
-    background-color: #1b5e20;
-}
-
-/* 4. טיפול בעמודות */
-div[data-testid="stHorizontalBlock"] {
-    align-items: flex-start;
-}
-
-/* 5. כותרות וטקסטים */
-h1, h2, h3, h4, h5, p, div {
-    text-align: right;
-}
-h1, h2, h3, h4, h5 {
-    color: #3f484c;
-}
-
-/* 6. אינפוטים */
-input, .stTextInput input, .stNumberInput input {
-    direction: rtl;
-    text-align: right;
-}
-
-/* 7. הודעות הצלחה */
-div[data-testid="stNotification"] p {
-    color: #171515 !important;
-    font-weight: bold;
+    text-align: center;
+    padding: 0.2rem 0.4rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

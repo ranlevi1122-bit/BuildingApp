@@ -1,0 +1,22 @@
+# ערכת עיצוב קבועה לאפליקציה - בהירה ונקייה, טורקיז כצבע מוביל.
+# קובץ זה נטען אוטומטית ע"י Streamlit (גם ב-Streamlit Cloud).
+[theme]
+base = "light"
+primaryColor = "#0F766E"
+backgroundColor = "#F5F8F7"
+secondaryBackgroundColor = "#EAF1EF"
+textColor = "#13302E"
+borderColor = "#D5E6E3"
+showWidgetBorder = true
+baseRadius = "10px"
+buttonRadius = "10px"
+font = "Heebo:https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap"
+headingFont = "Heebo:https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap"
+greenColor = "#1F7A4D"
+redColor = "#C2453B"
+yellowColor = "#E07A2E"   # כתום לאזהרות - הזהב שמור לחגים בלבד
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F8F7"
+borderColor = "#D5E6E3"
