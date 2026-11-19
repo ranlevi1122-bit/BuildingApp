@@ -26,6 +26,10 @@
 .st-key-nav button p,
 [class*="st-key-day_pick_"] button p { font-weight: 600; white-space: nowrap; }
 
+/* תפריט עליון: תמיד שורה אחת, כל הלשוניות ברוחב שווה */
+.st-key-nav [data-testid="stButtonGroup"] > div { flex-wrap: nowrap; }
+.st-key-nav [data-testid="stButtonGroup"] button { flex: 1 1 0; min-width: 0; padding: 4px 6px; }
+
 [class*="st-key-day_pick_"] button { min-height: 3rem; }
 
 /* תפריט עליון ורצועת ימים ב-RTL: Streamlit מעגל את הפינות ומחפיף גבולות כאילו משמאל לימין,
@@ -78,7 +82,9 @@
 
 @media (max-width: 640px) {
     .st-key-slot_grid > div { flex: 0 0 calc(50% - 8px); }  /* 2 בשורה בנייד */
-    .st-key-nav button p { font-size: 0.85rem; }
+    /* בנייד: תווית ארוכה ("השיריונים שלי") יורדת שורה בתוך הלשונית במקום שהתפריט יישבר לשתי שורות */
+    .st-key-nav [data-testid="stButtonGroup"] button { padding: 4px 2px; min-height: 3rem; }
+    .st-key-nav button p { font-size: 0.8rem; white-space: normal; line-height: 1.2; word-break: keep-all; overflow-wrap: normal; }
 }
 
 /* ---------- 1. שלד וכיווניות: עברית מלאה, מימין לשמאל ---------- */
@@ -367,4 +373,11 @@ div[data-testid="stForm"] {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* ---------- גרפים: הטקסט בתוך הגרף משמאל לימין, כדי שסימן מינוס/מספרים לא יתהפכו ---------- */
+[data-testid="stVegaLiteChart"],
+[data-testid="stArrowVegaLiteChart"],
+.vega-embed {
+    direction: ltr;
 }

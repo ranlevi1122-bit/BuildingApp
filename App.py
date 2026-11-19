@@ -887,6 +887,29 @@ def render_telegram_card(user):
             else:
                 st.warning("עוד לא קיבלנו את ה-Start מהבוט. ודאו שלחצתם Start בטלגרם ונסו שוב.")
 
+# --- גרף עמודות לעברית: ציר ערכים מ-0, מספרים שלמים, קריאה מימין לשמאל ---
+WEEK_ORDER = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת']
+
+def bar_chart_rtl(df, cat_col, val_col, color, horizontal=False, order=None):
+    values = [{"cat": str(r[cat_col]), "val": int(r[val_col])} for _, r in df.iterrows()]
+    cat = {"field": "cat", "type": "nominal", "title": None,
+           "sort": order or ("-x" if horizontal else "-y"),
+           "axis": {"labelAngle": 0, "labelFontSize": 13, "orient": "right" if horizontal else "bottom"}}
+    val = {"field": "val", "type": "quantitative", "title": None,
+           "scale": {"domainMin": 0, "nice": True, "reverse": horizontal},   # אופקי: העמודות גדלות מימין
+           "axis": {"tickMinStep": 1, "format": "d", "orient": "bottom" if horizontal else "right"}}
+    if not horizontal:
+        cat["scale"] = {"reverse": True}   # ימי השבוע: ראשון בצד ימין
+    enc = {"y": cat, "x": val} if horizontal else {"x": cat, "y": val}
+    enc["tooltip"] = [{"field": "cat", "title": cat_col}, {"field": "val", "title": val_col}]
+    spec = {
+        "data": {"values": values},
+        "mark": {"type": "bar", "color": color, "cornerRadiusEnd": 3},
+        "encoding": enc,
+        "height": max(220, 26 * len(values)) if horizontal else 280,
+    }
+    st.vega_lite_chart(spec, use_container_width=True)
+
 # --- האפליקציה הראשית ---
 st.set_page_config(page_title="ניהול חדר דיירים", layout="wide")
 
@@ -1071,11 +1094,11 @@ else:
             st.rerun()
 
     # --- ניווט עליון (במקום תפריט צד שמוסתר בנייד) ---
-    nav_labels = {"book": "📅 שיריון", "mine": "🗂️ השיריונים שלי"}
+    nav_labels = {"book": "שיריון", "mine": "השיריונים שלי"}
     if is_admin:
-        nav_labels["requests"] = f"📥 בקשות{f' ({pend_b_count})' if pend_b_count else ''}"
-        nav_labels["users"] = f"👥 דיירים{f' ({pend_u_count})' if pend_u_count else ''}"
-        nav_labels["advanced"] = "🛠️ מתקדם"
+        nav_labels["requests"] = f"בקשות{f' ({pend_b_count})' if pend_b_count else ''}"
+        nav_labels["users"] = f"דיירים{f' ({pend_u_count})' if pend_u_count else ''}"
+        nav_labels["advanced"] = "מתקדם"
     menu = st.segmented_control(
         "תפריט", list(nav_labels), format_func=nav_labels.get, default="book", required=True,
         key="nav", label_visibility="collapsed", width="stretch",
@@ -1399,7 +1422,7 @@ else:
                 # 2. תצוגת מדדי מפתח (KPIs)
                 col1, col2, col3 = st.columns(3)
                 col1.metric("סה\"כ אירועים שאושרו", total_bookings, help="מספר השיריונים הכולל בסטטוס מאושר")
-                col2.metric("דירות פעילות", f"{active_users} / 49", help="כמה דירות שונות השתמשו בחדר")
+                col2.metric("דירות פעילות", f"\u2066{active_users} / 49\u2069", help="כמה דירות שונות השתמשו בחדר")
                 col3.metric("שיא פעילות", most_busy_day, help="היום בשבוע בו החדר הכי מבוקש")
                 
                 st.divider()
@@ -1410,12 +1433,12 @@ else:
                 with c1:
                     st.markdown("#### 📅 התפלגות עומס לפי ימים")
                     # שינוי צבע לגרף ימים - ירוק מותאם למותג
-                    st.bar_chart(day_stats.set_index('יום'), color="#0F766E")
+                    bar_chart_rtl(day_stats, 'יום', 'הזמנות', "#0F766E", order=WEEK_ORDER)
                 
                 with c2:
                     st.markdown("#### 🏢 דירוג שימוש לפי דירה")
                     # שימוש בגרף אופקי (Horizontal) - נראה הרבה יותר טוב לשמות/מספרי דירה
-                    st.bar_chart(apt_stats.set_index('דירה'), horizontal=True, color="#3559A8")
+                    bar_chart_rtl(apt_stats, 'דירה', 'הזמנות', "#3559A8", horizontal=True)
 
                 # 4. תוספת הנדסית: טבלת הצרכנים הכבדים (Pareto)
                 with st.expander("👁️ צפה בנתוני גלם ופילוח אחוזי"):
